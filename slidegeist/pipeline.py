@@ -407,7 +407,7 @@ def process_video(
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Install faster-whisper: pip install faster-whisper\n"
+            error_msg += "1. Install openai-whisper: pip install openai-whisper\n"
             error_msg += "2. For MLX (Apple Silicon): pip install mlx-whisper\n"
             error_msg += "3. For CUDA: Install PyTorch with CUDA support first\n"
             logger.error(error_msg)

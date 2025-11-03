@@ -1,10 +1,5 @@
 """Tests for video download functionality."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 from slidegeist.download import is_url, translate_url
 
 

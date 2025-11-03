@@ -148,10 +148,11 @@ def export_slides_json(
 
     slide_sections: list[str] = []
     index_lines: list[str] = []
+    total_slides = len(slide_metadata)
 
-    for slide_index, t_start, t_end, image_path in tqdm(
+    for index, (slide_index, t_start, t_end, image_path) in enumerate(tqdm(
         slide_metadata, desc="Processing slides", unit="slide", disable=not ocr_pipeline
-    ):
+    )):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
         image_filename = image_path.name
 

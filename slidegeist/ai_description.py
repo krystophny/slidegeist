@@ -218,8 +218,6 @@ class LlamaCppQwen3Describer:
 
     def _download_model(self, filename: str) -> Path:
         """Download model file from HuggingFace if needed."""
-        from pathlib import Path
-
         cache_dir = Path.home() / ".cache" / "slidegeist" / "models"
         cache_dir.mkdir(parents=True, exist_ok=True)
         model_file = cache_dir / filename

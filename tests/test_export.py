@@ -1,7 +1,6 @@
 """Tests for Markdown export functionality."""
 
 from pathlib import Path
-from typing import Any, Dict, List
 
 import cv2
 import numpy as np
