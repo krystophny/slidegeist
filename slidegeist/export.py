@@ -13,6 +13,89 @@ from slidegeist.transcribe import Segment
 logger = logging.getLogger(__name__)
 
 
+def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
+    """Parse existing slides.md to extract per-slide content.
+
+    Args:
+        markdown_path: Path to existing slides.md file.
+
+    Returns:
+        Dictionary mapping slide_id to dict with keys: 'transcript', 'ocr', 'visual_elements'.
+        Returns empty dict if file doesn't exist or can't be parsed.
+    """
+    if not markdown_path.exists():
+        return {}
+
+    try:
+        content = markdown_path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not read existing markdown: {e}")
+        return {}
+
+    slides_data: dict[str, dict[str, str]] = {}
+    current_slide_id: str | None = None
+    current_section: str | None = None
+    current_content: list[str] = []
+
+    for line in content.split("\n"):
+        # Detect slide anchor: <a name="slide_001"></a>
+        if line.strip().startswith('<a name="slide_'):
+            if current_slide_id and current_section:
+                # Save previous section
+                slides_data.setdefault(current_slide_id, {})
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+                current_content = []
+
+            # Extract slide ID
+            try:
+                current_slide_id = line.split('name="')[1].split('"')[0]
+                slides_data.setdefault(current_slide_id, {"transcript": "", "ocr": "", "visual_elements": ""})
+                current_section = None
+            except Exception:
+                current_slide_id = None
+            continue
+
+        # Detect sections
+        if line.strip() == "### Transcript":
+            if current_slide_id and current_section:
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+            current_section = "transcript"
+            current_content = []
+            continue
+
+        if line.strip() == "### OCR Text":
+            if current_slide_id and current_section:
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+            current_section = "ocr"
+            current_content = []
+            continue
+
+        if line.strip().startswith("**Visual Elements:**"):
+            if current_slide_id and current_section:
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+            current_section = "visual_elements"
+            current_content = [line]  # Include the header
+            continue
+
+        # Skip separator lines
+        if line.strip() == "---":
+            if current_slide_id and current_section:
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+            current_section = None
+            current_content = []
+            continue
+
+        # Accumulate content
+        if current_slide_id and current_section:
+            current_content.append(line)
+
+    # Save last section
+    if current_slide_id and current_section:
+        slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+
+    return slides_data
+
+
 def export_slides_json(
     video_path: Path,
     slide_metadata: list[tuple[int, float, float, Path]],
@@ -46,9 +129,16 @@ def export_slides_json(
     # OCR disabled by default - can be enabled by passing ocr_pipeline
     if ocr_pipeline is None:
         from slidegeist.ocr import NoOpPipeline
-        ocr_pipeline = NoOpPipeline()
+        ocr_pipeline = NoOpPipeline()  # type: ignore[assignment]
 
-    logger.info("Creating slides markdown with %d slides", len(slide_metadata))
+    # Read existing markdown to preserve/merge content
+    existing_data = _parse_existing_markdown(output_path)
+    has_existing = len(existing_data) > 0
+
+    if has_existing:
+        logger.info("Merging with existing slides markdown (%d slides)", len(existing_data))
+    else:
+        logger.info("Creating slides markdown with %d slides", len(slide_metadata))
 
     # Process all slides and collect data
     slide_sections: list[str] = []
@@ -59,15 +149,27 @@ def export_slides_json(
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
         image_filename = image_path.name
 
-        transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
+        # Get existing content for this slide (if any)
+        existing_slide = existing_data.get(slide_id, {})
 
-        ocr_available = ocr_pipeline._primary is not None and ocr_pipeline._primary.is_available
+        # Transcript: use new if provided, else keep existing
+        if transcript_segments:
+            transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
+        else:
+            transcript_text = existing_slide.get("transcript", "")
+
+        # OCR: run if available, else keep existing
+        ocr_available = (
+            ocr_pipeline is not None
+            and ocr_pipeline._primary is not None  # type: ignore[union-attr]
+            and ocr_pipeline._primary.is_available  # type: ignore[union-attr]
+        )
         if ocr_available:
             try:
                 transcript_payload = _collect_transcript_payload(
                     transcript_segments, t_start, t_end
                 )
-                ocr_payload = ocr_pipeline.process(
+                ocr_payload = ocr_pipeline.process(  # type: ignore[union-attr]
                     image_path=image_path,
                     transcript_full_text=transcript_text,
                     transcript_segments=transcript_payload["segments"],
@@ -76,11 +178,11 @@ def export_slides_json(
                 visual_elements = ocr_payload.get("visual_elements", [])
             except Exception as exc:
                 logger.warning("OCR failed for %s: %s", image_path, exc)
-                ocr_text = ""
+                ocr_text = existing_slide.get("ocr", "")
                 visual_elements = []
         else:
-            logger.warning("Tesseract not available, skipping OCR for %s", image_path)
-            ocr_text = ""
+            # No OCR available: keep existing or empty
+            ocr_text = existing_slide.get("ocr", "")
             visual_elements = []
 
         time_str = f"{_format_timestamp(t_start)}-{_format_timestamp(t_end)}"
