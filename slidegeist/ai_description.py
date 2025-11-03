@@ -114,19 +114,19 @@ OUTPUT REQUIREMENTS:
 
 
 class TorchQwen3Describer:
-    """AI slide describer using Qwen3-VL-8B via PyTorch with full CUDA support."""
+    """AI slide describer using Qwen3-VL-4B via PyTorch with full CUDA support."""
 
-    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+    MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
 
     def __init__(
         self,
-        max_new_tokens: int = 2048,  # Qwen3-VL recommended for detailed analysis
+        max_new_tokens: int = 1024,  # Balanced: enough detail but faster generation
         temperature: float = 0.7,  # Qwen3-VL recommended for vision tasks
         top_p: float = 0.8,  # Qwen3-VL recommended
         top_k: int = 20,  # Qwen3-VL recommended
         device: str = "auto",
     ) -> None:
-        self.name = "Qwen3-VL-8B (PyTorch)"
+        self.name = "Qwen3-VL-4B (PyTorch FP16)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -244,23 +244,17 @@ class TorchQwen3Describer:
         gc.collect()
 
         if self._device == "cuda":
-            # Use 4-bit quantization for CUDA (much faster, uses ~4-5GB VRAM)
-            bnb_config = self._BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=self._torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
-            )
+            # Use FP16 for CUDA (fast and fits in 16GB VRAM: ~10-12GB, 25-35 tokens/sec)
             self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
                 self.MODEL_ID,
-                quantization_config=bnb_config,
+                torch_dtype=self._torch.float16,
                 device_map="auto",
             )
         else:
             # CPU: load in full precision
             self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
                 self.MODEL_ID,
-                dtype=self._torch.float32,
+                torch_dtype=self._torch.float32,
                 device_map="cpu",
             )
 
