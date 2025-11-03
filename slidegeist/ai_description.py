@@ -119,7 +119,7 @@ class LlamaCppQwen3Describer:
     # Qwen3-VL-30B-A3B GGUF models from unsloth
     MODEL_ID = "unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF"
     MODEL_FILE = "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf"
-    MMPROJ_FILE = "mmproj-Qwen3-VL-30B-A3B-Instruct-f16.gguf"
+    MMPROJ_FILE = "mmproj-F16.gguf"
 
     def __init__(
         self,
