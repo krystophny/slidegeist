@@ -52,21 +52,35 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Extract slide content for reconstruction. Output exactly 5 sections (max 3 sentences each), then write END.
+    return f"""Describe this slide so another AI can recreate it exactly. Use structured markdown format.
 
-1. TOPIC: [1-3 words only]
+## TITLE
+[If visible: exact title text. If not visible: infer descriptive title from content (2-8 words)]
 
-2. TITLE: [slide title only, or "None"]
+## TEXT CONTENT
+[List all visible text verbatim in order of appearance (top to bottom, left to right)]
+[Include: headings, body text, bullet points, labels, annotations]
+[Format: Use markdown bullets for lists, preserve line breaks]
 
-3. TEXT_CONTENT: [All visible text verbatim. List main text blocks. Max 200 words.]
+## FORMULAS
+[Every mathematical equation in LaTeX notation]
+[Format: One equation per line with $...$ for inline or $$...$$ for display]
+[Include: variable definitions, units, equation numbers if present]
+[If no formulas: write "None"]
 
-4. FORMULAS: [All equations in LaTeX. One equation per line. Or write "None".]
+## VISUAL ELEMENTS
+[Describe every diagram, plot, graph, or illustration for recreation]
+[Specify: type (flowchart/plot/diagram), spatial layout (top-left/center/etc), components (boxes/arrows/curves), colors, labels]
+[If no visual elements: write "None"]
 
-5. VISUAL_ELEMENTS: [Describe diagrams/plots/graphs. Max 3 sentences. Or write "None".]
+## LAYOUT
+[Overall structure: single-column/two-column/grid]
+[Spatial relationships: what's above/below/beside what]
+[Hierarchy: title size, heading levels, emphasis]
 
 Context: {context}
 
-After section 5, write END and stop."""
+END"""
 
 
 class TorchQwen3Describer:
