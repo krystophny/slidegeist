@@ -42,7 +42,7 @@ mlx = [
 ]
 torch = [
     "torch>=2.0.0",
-    "transformers>=4.37.0",
+    "transformers==4.56.2",
     "torchvision>=0.15.0",
     "accelerate>=0.26.0",
     "autoawq>=0.2.0",
