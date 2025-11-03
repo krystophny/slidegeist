@@ -105,6 +105,8 @@ def export_slides_json(
     ocr_pipeline: OcrPipeline | None = None,
     source_url: str | None = None,
     split_slides: bool = False,
+    run_ocr: bool = True,
+    run_ai_description: bool = True,
 ) -> None:
     """Export slides as Markdown file(s).
 
@@ -122,6 +124,8 @@ def export_slides_json(
         source_url: Optional source URL for the video.
         split_slides: If True, create separate files (index.md + slide_NNN.md).
                      If False (default), create single slides.md file.
+        run_ocr: If True, run OCR on slides.
+        run_ai_description: If True, generate AI descriptions.
     """
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -212,7 +216,7 @@ def export_slides_json(
             )
             logger.debug("Wrote slide %s (%d/%d)", per_slide_path, index + 1, total_slides)
         else:
-            # Single file mode: collect sections and create thumbnail links
+            # Single file mode: collect sections only (no table of contents)
             section = _build_slide_section(
                 slide_index=slide_index,
                 t_start=t_start,
@@ -224,10 +228,6 @@ def export_slides_json(
                 ai_description=ai_description,
             )
             slide_sections.append(section)
-
-            index_lines.append(
-                f"- [Slide {slide_index}](#{slide_id}) • {time_str}"
-            )
 
     # Write output file(s)
     if split_slides:
@@ -246,7 +246,6 @@ def export_slides_json(
             source_url=source_url,
             duration=slide_metadata[-1][2] if slide_metadata else 0.0,
             model=model,
-            index_lines=index_lines,
             slide_sections=slide_sections,
         )
         output_path.write_text(combined_content, encoding="utf-8")
@@ -439,7 +438,6 @@ def _build_combined_markdown(
     source_url: str | None,
     duration: float,
     model: str,
-    index_lines: list[str],
     slide_sections: list[str],
 ) -> str:
     """Build combined markdown file with header, index, and all slides."""
@@ -460,12 +458,10 @@ def _build_combined_markdown(
         f"**Transcription Model:** {model}  ",
         f"**Processed:** {processed_at}",
         "",
-        "## Table of Contents",
+        "---",
         "",
     ])
 
-    lines.extend(index_lines)
-    lines.extend(["", "---", ""])
     lines.extend(slide_sections)
 
     return "\n".join(lines)

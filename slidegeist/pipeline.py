@@ -74,13 +74,13 @@ def can_resume_from_slides(output_dir: Path) -> bool:
 def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, float, Path]]:
     """Load metadata for existing slides in output directory.
 
+    Parses slides.md or index.md to extract timing information.
+
     Args:
         output_dir: Directory containing slides subdirectory.
 
     Returns:
         List of tuples (slide_number, start_time, end_time, path) for each slide.
-        Times are set to 0.0 as they need to be reconstructed from scene detection
-        or transcript data.
     """
     slides_dir = output_dir / "slides"
     if not slides_dir.exists():
@@ -92,9 +92,49 @@ def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, flo
         key=lambda p: p.name,
     )
 
+    # Try to parse timing information from markdown
+    timing_info: dict[str, tuple[float, float]] = {}
+    markdown_path = output_dir / "slides.md"
+    if not markdown_path.exists():
+        markdown_path = output_dir / "index.md"
+
+    if markdown_path.exists():
+        try:
+            import re
+            content = markdown_path.read_text(encoding="utf-8")
+            # Look for patterns like: **Time:** 00:05 - 01:23
+            # or in YAML frontmatter: time_start: 5.0 / time_end: 83.0
+
+            # Pattern 1: YAML frontmatter (split mode)
+            yaml_pattern = r"id:\s*(\S+).*?time_start:\s*([\d.]+).*?time_end:\s*([\d.]+)"
+            for match in re.finditer(yaml_pattern, content, re.DOTALL):
+                slide_id = match.group(1)
+                t_start = float(match.group(2))
+                t_end = float(match.group(3))
+                timing_info[slide_id] = (t_start, t_end)
+
+            # Pattern 2: **Time:** format (combined mode)
+            time_pattern = r'<a name="(slide_\d+)"></a>.*?\*\*Time:\*\*\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)'
+            for match in re.finditer(time_pattern, content, re.DOTALL):
+                slide_id = match.group(1)
+                start_min, start_sec = int(match.group(2)), int(match.group(3))
+                end_min, end_sec = int(match.group(4)), int(match.group(5))
+                t_start = start_min * 60 + start_sec
+                t_end = end_min * 60 + end_sec
+                timing_info[slide_id] = (t_start, t_end)
+
+        except Exception as e:
+            logger.debug(f"Could not parse timing info from markdown: {e}")
+
     metadata: list[tuple[int, float, float, Path]] = []
     for idx, slide_path in enumerate(slide_files, start=1):
-        metadata.append((idx, 0.0, 0.0, slide_path))
+        slide_id = slide_path.stem
+        if slide_id in timing_info:
+            t_start, t_end = timing_info[slide_id]
+            metadata.append((idx, t_start, t_end, slide_path))
+        else:
+            # Default to 0.0 if not found
+            metadata.append((idx, 0.0, 0.0, slide_path))
 
     return metadata
 
@@ -169,6 +209,57 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
     return stages
 
 
+def detect_failed_stages(output_dir: Path) -> dict[str, bool]:
+    """Detect which processing stages have failed.
+
+    Checks for .failed marker files in the output directory.
+
+    Args:
+        output_dir: Directory to check.
+
+    Returns:
+        Dict with keys: 'transcription', 'ocr', 'ai_description'
+        Each value is True if that stage has failed.
+    """
+    return {
+        "transcription": (output_dir / ".transcription_failed").exists(),
+        "ocr": (output_dir / ".ocr_failed").exists(),
+        "ai_description": (output_dir / ".ai_description_failed").exists(),
+    }
+
+
+def mark_stage_failed(output_dir: Path, stage: str, error_msg: str) -> None:
+    """Mark a stage as failed with an error message.
+
+    Args:
+        output_dir: Output directory.
+        stage: Stage name ('transcription', 'ocr', 'ai_description').
+        error_msg: Error message to store.
+    """
+    marker_file = output_dir / f".{stage}_failed"
+    try:
+        marker_file.write_text(error_msg, encoding="utf-8")
+        logger.info(f"Marked {stage} as failed: {marker_file}")
+    except Exception as e:
+        logger.debug(f"Could not write failure marker: {e}")
+
+
+def clear_stage_failure(output_dir: Path, stage: str) -> None:
+    """Clear a stage failure marker.
+
+    Args:
+        output_dir: Output directory.
+        stage: Stage name ('transcription', 'ocr', 'ai_description').
+    """
+    marker_file = output_dir / f".{stage}_failed"
+    if marker_file.exists():
+        try:
+            marker_file.unlink()
+            logger.debug(f"Cleared failure marker: {marker_file}")
+        except Exception as e:
+            logger.debug(f"Could not remove failure marker: {e}")
+
+
 def process_video(
     video_path: Path,
     output_dir: Path,
@@ -183,6 +274,7 @@ def process_video(
     skip_transcription: bool = False,
     split_slides: bool = False,
     ocr_pipeline: OcrPipeline | None = None,
+    retry_failed: bool = False,
 ) -> dict[str, Path | list[Path]]:
     """Process a video and return generated artifacts.
 
@@ -206,8 +298,13 @@ def process_video(
     logger.info(f"Processing video: {video_path}")
     logger.info(f"Output directory: {output_dir}")
 
-    # Detect which stages are already completed
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Detect which stages are already completed and which have failed
     completed_stages = detect_completed_stages(output_dir)
+    failed_stages = detect_failed_stages(output_dir)
+
     logger.info("=" * 60)
     logger.info("STAGE DETECTION")
     logger.info("=" * 60)
@@ -216,6 +313,20 @@ def process_video(
     logger.info(f"✓ OCR done: {completed_stages['ocr']}")
     logger.info(f"✓ AI descriptions done: {completed_stages['ai_description']}")
 
+    if any(failed_stages.values()):
+        logger.info("")
+        logger.info("Previous failures detected:")
+        if failed_stages["transcription"]:
+            logger.warning("✗ Transcription failed previously")
+        if failed_stages["ocr"]:
+            logger.warning("✗ OCR failed previously")
+        if failed_stages["ai_description"]:
+            logger.warning("✗ AI description failed previously")
+        if retry_failed:
+            logger.info("--retry-failed enabled: will retry failed stages")
+        else:
+            logger.info("Use --retry-failed to retry failed stages")
+
     # Check if we can resume from existing work
     resume_from_existing = completed_stages["slides"] and not skip_slides
     if resume_from_existing:
@@ -223,9 +334,6 @@ def process_video(
         if existing_video:
             video_path = existing_video
             logger.info(f"Using existing video: {video_path}")
-
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, Path | list[Path]] = {"output_dir": output_dir}
 
@@ -280,31 +388,57 @@ def process_video(
         )
         results["slides_md"] = markdown_path
 
-    # Step 3: Transcription (skip if already done)
+    # Step 3: Transcription (skip if already done or failed without retry)
     transcript_segments = []
-    transcription_needed = not skip_transcription and not completed_stages["transcription"]
+    should_skip_transcription = (
+        skip_transcription
+        or (completed_stages["transcription"] and not retry_failed)
+        or (failed_stages["transcription"] and not retry_failed)
+    )
 
-    if transcription_needed:
+    if not should_skip_transcription:
         logger.info("=" * 60)
         logger.info("STEP 3: Audio Transcription")
         logger.info("=" * 60)
 
-        transcript_data = transcribe_video(video_path, model_size=model, device=device)
-        transcript_segments = transcript_data["segments"]
+        try:
+            transcript_data = transcribe_video(video_path, model_size=model, device=device)
+            transcript_segments = transcript_data["segments"]
+            clear_stage_failure(output_dir, "transcription")
+        except Exception as exc:
+            error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
+            error_msg += "1. Install faster-whisper: pip install faster-whisper\n"
+            error_msg += "2. For MLX (Apple Silicon): pip install mlx-whisper\n"
+            error_msg += "3. For CUDA: Install PyTorch with CUDA support first\n"
+            logger.error(error_msg)
+            mark_stage_failed(output_dir, "transcription", error_msg)
+            # Continue without transcription
     elif completed_stages["transcription"]:
         logger.info("=" * 60)
         logger.info("STEP 3: Transcription already completed (skipping)")
         logger.info("=" * 60)
+    elif failed_stages["transcription"]:
+        logger.info("=" * 60)
+        logger.info("STEP 3: Transcription failed previously (skipping)")
+        logger.info("=" * 60)
+        # Read failure message if available
+        failure_file = output_dir / ".transcription_failed"
+        if failure_file.exists():
+            try:
+                failure_msg = failure_file.read_text(encoding="utf-8")
+                logger.warning(failure_msg)
+            except Exception:
+                pass
 
     # Step 4: Update/re-run markdown export
     # Always run export if we did any new processing, OR if OCR/AI stages need updating
     has_slides = len(slide_metadata) > 0
-    has_new_data = transcription_needed  # Did we just run transcription?
+    transcription_just_ran = not should_skip_transcription and len(transcript_segments) > 0
     needs_ocr_update = has_slides and not completed_stages["ocr"]
     needs_ai_update = has_slides and not completed_stages["ai_description"]
 
     # Re-export if: new transcription, need OCR, or need AI descriptions
-    should_export = has_slides and (has_new_data or needs_ocr_update or needs_ai_update)
+    should_export = has_slides and (transcription_just_ran or needs_ocr_update or needs_ai_update)
 
     if should_export:
         logger.info("=" * 60)
@@ -336,7 +470,7 @@ def process_video(
     if has_slides:
         action = "Loaded" if completed_stages["slides"] else "Extracted"
         logger.info(f"✓ {action} {len(slide_metadata)} slides")
-    if completed_stages["transcription"] or transcription_needed:
+    if completed_stages["transcription"] or transcription_just_ran:
         logger.info("✓ Transcription available")
     if completed_stages["ocr"] or needs_ocr_update:
         logger.info("✓ OCR complete")
