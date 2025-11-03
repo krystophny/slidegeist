@@ -1,7 +1,7 @@
 # Core dependencies (exact versions for reproducibility)
 numpy==2.3.4
 opencv-python==4.12.0.88
-yt-dlp>=2024.12.0
+yt-dlp==2024.12.23
 pytesseract==0.3.13
 Pillow==11.3.0
 tqdm==4.67.1
