@@ -160,7 +160,21 @@ class TorchQwen3Describer:
         # Generate with Qwen3-VL recommended parameters
         logger.info(f"Generating description (max {self.max_new_tokens} tokens, temp={self.temperature})...")
         import time
+        import sys
         start_time = time.time()
+
+        # Custom streamer that prints tokens without newlines for real-time feedback
+        streamer = None
+        if logger.isEnabledFor(logging.DEBUG):
+            from transformers import TextStreamer  # type: ignore[import-untyped]
+            # TextStreamer prints to sys.stdout by default, let it print directly
+            streamer = TextStreamer(
+                self._processor.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+            sys.stdout.write("\nGenerating: ")
+            sys.stdout.flush()
 
         with self._torch.no_grad():
             output_ids = self._model.generate(
@@ -171,7 +185,12 @@ class TorchQwen3Describer:
                 top_k=self.top_k,
                 do_sample=True,
                 repetition_penalty=1.0,
+                streamer=streamer,
             )
+
+        if streamer is not None:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
         elapsed = time.time() - start_time
         tokens_generated = len(output_ids[0]) - len(inputs["input_ids"][0])
