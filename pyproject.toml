@@ -7,7 +7,7 @@ allow-direct-references = true
 
 [project]
 name = "slidegeist"
-version = "2025.10.22"
+version = "2025.11.3"
 description = "Extract slides and transcripts from lecture videos with minimal dependencies"
 readme = "README.md"
 license = { text = "MIT" }
