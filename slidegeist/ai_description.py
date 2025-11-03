@@ -243,10 +243,12 @@ class TorchQwen3Describer:
         gc.collect()
 
         if self._device == "cuda":
-            # Use 8-bit quantization for CUDA (fits comfortably in 16GB VRAM)
+            # Use 4-bit quantization for CUDA (much faster, uses ~4-5GB VRAM)
             bnb_config = self._BitsAndBytesConfig(
-                load_in_8bit=True,
-                bnb_8bit_compute_dtype=self._torch.float16,
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=self._torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
             )
             self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
                 self.MODEL_ID,
