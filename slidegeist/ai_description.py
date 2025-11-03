@@ -179,18 +179,14 @@ class TorchQwen3Describer:
             },
         ]
 
-        # Process inputs using official API
+        # Process inputs using official API (from QwenLM/Qwen3-VL repo)
         logger.debug("Processing inputs...")
-        text = self._processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        image_inputs, video_inputs = self._processor.process_vision_info(messages)
-        inputs = self._processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="pt",
+        inputs = self._processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt"
         )
         inputs = inputs.to(self._model.device)
 
