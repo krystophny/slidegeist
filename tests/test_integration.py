@@ -110,3 +110,107 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     captured = capsys.readouterr()
     assert "Processing complete" in captured.out
+
+
+def test_process_pdf_produces_slides_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure process_pdf extracts pages and produces slides.md."""
+    from slidegeist.pipeline import process_pdf
+    import cv2
+    import numpy as np
+
+    def fake_extract_pdf_pages(
+        pdf_path: Path,
+        output_dir: Path,
+        image_format: str = "jpg",
+        dpi: int = 300,
+    ) -> list[tuple[int, Path, str]]:
+        slides_dir = output_dir / "slides"
+        slides_dir.mkdir(parents=True, exist_ok=True)
+        results: list[tuple[int, Path, str]] = []
+        for page_num in [1, 2]:
+            slide_path = slides_dir / f"slide_{page_num:03d}.{image_format}"
+            # Create a proper image file that can be read by PIL
+            img = np.full((100, 200, 3), 128, dtype=np.uint8)
+            cv2.imwrite(str(slide_path), img)
+            embedded_text = f"Page {page_num} embedded text"
+            results.append((page_num, slide_path, embedded_text))
+        return results
+
+    # Mock AI descriptions to skip actual model loading
+    def fake_run_ai_descriptions(*_: Any, **__: Any) -> dict[str, str]:
+        return {
+            "slide_001": "Fake AI description for slide 1",
+            "slide_002": "Fake AI description for slide 2",
+        }
+
+    monkeypatch.setattr("slidegeist.pdf.extract_pdf_pages", fake_extract_pdf_pages)
+    monkeypatch.setattr("slidegeist.export.run_ai_descriptions", fake_run_ai_descriptions)
+
+    pdf_path = tmp_path / "test.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake pdf")
+
+    result = process_pdf(
+        pdf_path=pdf_path,
+        output_dir=tmp_path / "out",
+        image_format="jpg",
+    )
+
+    slides = result.get("slides")
+    assert isinstance(slides, list)
+    assert len(slides) == 2
+
+    # Check slides.md exists
+    slides_md = result.get("slides_md")
+    assert isinstance(slides_md, Path)
+    assert slides_md.exists()
+
+    content = slides_md.read_text()
+    assert "# Lecture Slides" in content
+    assert "**PDF:** test.pdf" in content
+
+    # Should not have duration or transcription model
+    assert "**Duration:**" not in content
+    assert "**Transcription Model:**" not in content
+
+    # Should have slide sections
+    assert "## Slide 1" in content
+    assert "## Slide 2" in content
+
+    # Should have PDF embedded text sections
+    assert "### PDF Embedded Text" in content
+    assert "Page 1 embedded text" in content
+    assert "Page 2 embedded text" in content
+
+    # Should not have transcript sections
+    assert "### Transcript" not in content
+
+
+def test_cli_detects_pdf_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Test CLI correctly detects PDF input and routes to process_pdf."""
+    output_dir = tmp_path / "cli-out"
+    called_process_pdf = False
+
+    def fake_process_pdf(*_: Any, **__: Any) -> dict[str, Any]:
+        nonlocal called_process_pdf
+        called_process_pdf = True
+        slides_md = output_dir / "slides.md"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        slides_md.write_text('# Lecture Slides\n\n**PDF:** test.pdf')
+        return {
+            "output_dir": output_dir,
+            "slides": [],
+            "slides_md": slides_md,
+        }
+
+    pdf_path = tmp_path / "test.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+    monkeypatch.setattr("slidegeist.cli.process_pdf", fake_process_pdf)
+    monkeypatch.setattr("slidegeist.cli.is_pdf_file", lambda path: str(path).endswith(".pdf"))
+    monkeypatch.setattr(sys, "argv", ["slidegeist", str(pdf_path)])
+
+    cli.main()
+
+    captured = capsys.readouterr()
+    assert "Processing complete" in captured.out
+    assert called_process_pdf, "process_pdf was not called"

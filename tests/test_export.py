@@ -154,3 +154,176 @@ def test_export_slides_empty_metadata(tmp_path: Path) -> None:
     # No slide markdown files in root (split mode with no slides)
     md_files = list(tmp_path.glob("slide_*.md"))
     assert len(md_files) == 0
+
+
+def test_export_pdf_hides_timestamps_combined_mode(tmp_path: Path) -> None:
+    """Test PDF export hides timestamps in combined mode."""
+    pdf_path = Path("/fake/document.pdf")
+
+    slides_dir = tmp_path / "slides"
+    slides_dir.mkdir()
+    img1 = slides_dir / "slide_001.jpg"
+    img2 = slides_dir / "slide_002.jpg"
+    _make_text_image(img1, "INTRO")
+    _make_text_image(img2, "SUMMARY")
+
+    slide_metadata = [
+        (1, 0.0, 0.0, img1),  # Zero timestamps for PDFs
+        (2, 0.0, 0.0, img2),
+    ]
+
+    transcript_segments: list[Segment] = []  # No transcript for PDFs
+
+    output_file = tmp_path / "slides.md"
+    ocr_pipeline = build_default_ocr_pipeline()
+
+    pdf_texts = {
+        "slide_001": "Introduction to the topic",
+        "slide_002": "Summary and conclusions",
+    }
+
+    export_slides_json(
+        pdf_path,
+        slide_metadata,
+        transcript_segments,
+        output_file,
+        "",  # No model for PDFs
+        ocr_pipeline=ocr_pipeline,
+        split_slides=False,
+        pdf_texts=pdf_texts,
+    )
+
+    assert output_file.exists()
+    content = output_file.read_text()
+
+    # Check header uses PDF label
+    assert "**PDF:** document.pdf" in content
+    assert "**Video:**" not in content
+
+    # Check no duration or transcription model
+    assert "**Duration:**" not in content
+    assert "**Transcription Model:**" not in content
+
+    # Check no timestamps in slide sections
+    assert "**Time:**" not in content
+    assert "00:00 - 00:00" not in content
+
+    # Check PDF embedded text sections exist
+    assert "### PDF Embedded Text" in content
+    assert "Introduction to the topic" in content
+    assert "Summary and conclusions" in content
+
+    # Check no transcript sections
+    assert "### Transcript" not in content
+
+
+def test_export_pdf_hides_timestamps_split_mode(tmp_path: Path) -> None:
+    """Test PDF export hides timestamps in split mode."""
+    pdf_path = Path("/fake/document.pdf")
+
+    slides_dir = tmp_path / "slides"
+    slides_dir.mkdir()
+    img1 = slides_dir / "slide_001.jpg"
+    _make_text_image(img1, "TITLE")
+
+    slide_metadata = [
+        (1, 0.0, 0.0, img1),  # Zero timestamps for PDFs
+    ]
+
+    transcript_segments: list[Segment] = []
+
+    output_file = tmp_path / "index.md"
+    ocr_pipeline = build_default_ocr_pipeline()
+
+    pdf_texts = {
+        "slide_001": "Page 1 embedded text",
+    }
+
+    export_slides_json(
+        pdf_path,
+        slide_metadata,
+        transcript_segments,
+        output_file,
+        "",
+        ocr_pipeline=ocr_pipeline,
+        split_slides=True,
+        pdf_texts=pdf_texts,
+    )
+
+    # Check index file
+    assert output_file.exists()
+    index_content = output_file.read_text()
+
+    assert "**PDF:** document.pdf" in index_content
+    assert "**Duration:**" not in index_content
+    assert "**Transcription Model:**" not in index_content
+
+    # Check index link has no timestamp
+    assert "[Slide 1](slide_001.md)" in index_content
+    # Should not have " • 00:00-00:00" suffix
+    lines_with_slide1 = [line for line in index_content.split("\n") if "Slide 1" in line]
+    assert len(lines_with_slide1) == 1
+    assert " • 00:00-00:00" not in lines_with_slide1[0]
+
+    # Check individual slide file
+    slide1_md = tmp_path / "slide_001.md"
+    assert slide1_md.exists()
+    slide1_content = slide1_md.read_text()
+
+    # Should not have time fields in front matter
+    assert "time_start:" not in slide1_content
+    assert "time_end:" not in slide1_content
+
+    # Should have PDF text section
+    assert "## PDF Embedded Text" in slide1_content
+    assert "Page 1 embedded text" in slide1_content
+
+    # Should not have transcript section
+    assert "## Transcript" not in slide1_content
+
+
+def test_export_video_shows_timestamps(tmp_path: Path) -> None:
+    """Test video export shows timestamps (regression test)."""
+    video_path = Path("/fake/video.mp4")
+
+    slides_dir = tmp_path / "slides"
+    slides_dir.mkdir()
+    img1 = slides_dir / "slide_001.jpg"
+    _make_text_image(img1, "INTRO")
+
+    slide_metadata = [
+        (1, 0.0, 10.5, img1),  # Nonzero timestamps for videos
+    ]
+
+    transcript_segments: list[Segment] = [
+        {"start": 0.0, "end": 5.0, "text": "Hello world", "words": []},
+    ]
+
+    output_file = tmp_path / "slides.md"
+    ocr_pipeline = build_default_ocr_pipeline()
+
+    export_slides_json(
+        video_path,
+        slide_metadata,
+        transcript_segments,
+        output_file,
+        "tiny",
+        ocr_pipeline=ocr_pipeline,
+        split_slides=False,
+    )
+
+    content = output_file.read_text()
+
+    # Should have video label
+    assert "**Video:** video.mp4" in content
+
+    # Should have duration and model
+    assert "**Duration:**" in content
+    assert "**Transcription Model:** tiny" in content
+
+    # Should have timestamps in slide section
+    assert "**Time:** 00:00 - 00:10" in content
+
+    # Should have transcript section
+    assert "### Transcript" in content
+    assert "Hello world" in content
