@@ -217,12 +217,12 @@ class TorchQwen3Describer:
         try:
             import torch  # type: ignore[import-untyped]
             from transformers import (  # type: ignore[import-untyped,import-not-found]
+                AutoModelForVision2Seq,
                 AutoProcessor,
-                Qwen3VLMoeForConditionalGeneration,
             )
 
             self._torch = torch
-            self._qwen3vl_class = Qwen3VLMoeForConditionalGeneration
+            self._qwen3vl_class = AutoModelForVision2Seq
             self._autoprocessor_class = AutoProcessor
 
             if torch.cuda.is_available():
@@ -311,7 +311,8 @@ class TorchQwen3Describer:
                 self.MODEL_ID,
                 dtype=self._torch.float16,  # AWQ works best with float16
                 device_map="auto",
-                max_memory=max_memory
+                max_memory=max_memory,
+                trust_remote_code=True
             )
         else:
             # CPU only
@@ -323,7 +324,9 @@ class TorchQwen3Describer:
             if self._model is not None:
                 self._model = self._model.to(self._device)
 
-        self._processor = self._autoprocessor_class.from_pretrained(self.MODEL_ID)
+        self._processor = self._autoprocessor_class.from_pretrained(
+            self.MODEL_ID, trust_remote_code=True
+        )
 
 
 def build_ai_describer() -> MlxQwen3Describer | TorchQwen3Describer | None:
