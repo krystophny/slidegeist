@@ -1,0 +1,16 @@
+# Core dependencies (exact versions for reproducibility)
+faster-whisper==1.1.0
+numpy==2.2.1
+opencv-python==4.10.0.84
+yt-dlp==2024.12.23
+pytesseract==0.3.13
+Pillow==11.0.0
+tqdm==4.67.1
+psutil==7.0.0
+
+# Optional torch dependencies (exact versions)
+torch==2.9.0
+transformers==4.56.2
+torchvision==0.24.0
+accelerate==1.11.0
+autoawq==0.2.9
