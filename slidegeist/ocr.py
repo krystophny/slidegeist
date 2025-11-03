@@ -8,9 +8,7 @@ import os
 import platform
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from PIL import Image
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +18,7 @@ class RefinementOutput:
     """Structured response from an OCR refinement model."""
 
     text: str
-    visual_elements: List[str]
+    visual_elements: list[str]
     raw_response: str
 
 
@@ -28,7 +26,7 @@ class BaseRefiner:
     """Interface for optional OCR refinement models."""
 
     name: str = "unknown"
-    version: Optional[str] = None
+    version: str | None = None
 
     def is_available(self) -> bool:  # pragma: no cover - interface hook
         return False
@@ -38,9 +36,38 @@ class BaseRefiner:
         image_path: Path,
         raw_text: str,
         transcript: str,
-        segments: List[Dict[str, Any]],
-    ) -> Optional[RefinementOutput]:  # pragma: no cover - interface hook
+        segments: list[dict[str, Any]],
+    ) -> RefinementOutput | None:  # pragma: no cover - interface hook
         raise NotImplementedError
+
+
+class NoOpPipeline:
+    """No-op OCR pipeline that returns empty results."""
+
+    class _NoOpPrimary:
+        is_available = False
+
+    _primary = _NoOpPrimary()
+
+    def process(
+        self,
+        image_path: Path,
+        transcript_full_text: str,
+        transcript_segments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "engine": {
+                "primary": None,
+                "primary_version": None,
+                "refiner": None,
+                "refiner_version": None,
+            },
+            "raw_text": "",
+            "final_text": "",
+            "blocks": [],
+            "visual_elements": [],
+            "model_response": "",
+        }
 
 
 class OcrPipeline:
@@ -48,8 +75,8 @@ class OcrPipeline:
 
     def __init__(
         self,
-        primary_extractor: Optional["TesseractExtractor"] = None,
-        refiner: Optional[BaseRefiner] = None,
+        primary_extractor: TesseractExtractor | None = None,
+        refiner: BaseRefiner | None = None,
     ) -> None:
         self._primary = primary_extractor
         self._refiner = refiner
@@ -58,9 +85,9 @@ class OcrPipeline:
         self,
         image_path: Path,
         transcript_full_text: str,
-        transcript_segments: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        raw_payload: Dict[str, Any] = {
+        transcript_segments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        raw_payload: dict[str, Any] = {
             "engine": {
                 "primary": None,
                 "primary_version": None,
@@ -136,10 +163,10 @@ class TesseractExtractor:
         return self._pytesseract is not None
 
     @property
-    def version(self) -> Optional[str]:
+    def version(self) -> str | None:
         return self._version
 
-    def extract(self, image_path: Path) -> Dict[str, Any]:
+    def extract(self, image_path: Path) -> dict[str, Any]:
         if not self.is_available:
             raise RuntimeError("pytesseract is not available")
 
@@ -158,8 +185,8 @@ class TesseractExtractor:
             config="--psm 1",
         )
 
-        blocks: List[Dict[str, Any]] = []
-        raw_lines: List[str] = []
+        blocks: list[dict[str, Any]] = []
+        raw_lines: list[str] = []
 
         for idx, text in enumerate(data.get("text", [])):
             text = text.strip()
@@ -255,8 +282,8 @@ class MlxQwenRefiner(BaseRefiner):
         image_path: Path,
         raw_text: str,
         transcript: str,
-        segments: List[Dict[str, Any]],
-    ) -> Optional[RefinementOutput]:
+        segments: list[dict[str, Any]],
+    ) -> RefinementOutput | None:
         if not self._available:
             return None
 
@@ -312,9 +339,9 @@ class MlxQwenRefiner(BaseRefiner):
 def _build_prompt_messages(
     raw_text: str,
     transcript: str,
-    segments: List[Dict[str, Any]],
+    segments: list[dict[str, Any]],
     image_token: Any,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Construct chat template for Qwen refiners."""
 
     segment_payload = [
@@ -346,7 +373,7 @@ def _build_prompt_messages(
         f"\nContext: {json.dumps(context, ensure_ascii=False)}"
     )
 
-    content: List[Dict[str, Any]] = []
+    content: list[dict[str, Any]] = []
     if image_token is not None:
         content.append({"type": "image", "image": image_token})
     content.append({"type": "text", "text": user_text})
@@ -366,7 +393,7 @@ def _parse_model_response(response: str, fallback_text: str) -> RefinementOutput
     if not candidate:
         return RefinementOutput(text=fallback_text, visual_elements=[], raw_response=response)
 
-    json_obj: Optional[Dict[str, Any]] = None
+    json_obj: dict[str, Any] | None = None
     if candidate.startswith("{"):
         try:
             json_obj = json.loads(candidate)
@@ -400,7 +427,7 @@ def build_default_ocr_pipeline() -> OcrPipeline:
     """Create the default OCR pipeline using available components."""
 
     primary = TesseractExtractor()
-    refiner: Optional[BaseRefiner] = None
+    refiner: BaseRefiner | None = None
 
     if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() not in {"1", "true", "yes"}:
         if platform.system() == "Darwin":

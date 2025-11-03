@@ -14,7 +14,7 @@ from slidegeist.constants import (
 )
 from slidegeist.export import export_slides_json
 from slidegeist.ffmpeg import detect_scenes
-from slidegeist.ocr import OcrPipeline, build_default_ocr_pipeline
+from slidegeist.ocr import OcrPipeline
 from slidegeist.slides import extract_slides
 from slidegeist.transcribe import transcribe_video
 
@@ -142,7 +142,6 @@ def process_video(
         logger.info("=" * 60)
         logger.info("Found existing slides - resuming from transcription")
         logger.info("=" * 60)
-        skip_slides = True
         existing_video = find_video_file(output_dir)
         if existing_video:
             video_path = existing_video
@@ -153,10 +152,17 @@ def process_video(
 
     results: dict[str, Path | list[Path]] = {"output_dir": output_dir}
 
-    # Step 1: Scene detection (needed for slides)
+    # Step 1: Scene detection and slide extraction (or load existing)
     slide_metadata: list[tuple[int, float, float, Path]] = []
     scene_timestamps: list[float] = []
-    if not skip_slides:
+
+    if resume_from_slides:
+        # Resume: load existing slides without re-extraction
+        slide_metadata = load_existing_slide_metadata(output_dir)
+        results["slides"] = [path for _, _, _, path in slide_metadata]
+        logger.info(f"Loaded {len(slide_metadata)} existing slides")
+    elif not skip_slides:
+        # Normal flow: detect scenes and extract slides
         logger.info("=" * 60)
         logger.info("STEP 1: Scene Detection")
         logger.info("=" * 60)
@@ -178,10 +184,21 @@ def process_video(
 
         slide_metadata = extract_slides(video_path, scene_timestamps, output_dir, image_format)
         results["slides"] = [path for _, _, _, path in slide_metadata]
-    elif resume_from_slides:
-        slide_metadata = load_existing_slide_metadata(output_dir)
-        results["slides"] = [path for _, _, _, path in slide_metadata]
-        logger.info(f"Loaded {len(slide_metadata)} existing slides")
+
+        # Checkpoint: Save markdown with slides immediately after extraction
+        logger.info("Saving slides markdown checkpoint")
+        markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
+        export_slides_json(
+            video_path,
+            slide_metadata,
+            [],  # No transcript yet
+            markdown_path,
+            model="",  # No model yet
+            ocr_pipeline=ocr_pipeline,
+            source_url=source_url,
+            split_slides=split_slides,
+        )
+        results["slides_md"] = markdown_path
 
     # Step 3: Transcription
     transcript_segments = []
@@ -193,15 +210,16 @@ def process_video(
         transcript_data = transcribe_video(video_path, model_size=model, device=device)
         transcript_segments = transcript_data["segments"]
 
-    # Step 4: Export slides markdown (requires both slides and transcription)
-    if not skip_slides and not skip_transcription:
+    # Step 4: Update markdown with transcript (if both slides and transcript exist)
+    has_slides = len(slide_metadata) > 0
+    has_transcript = len(transcript_segments) > 0
+
+    if has_slides and has_transcript:
         logger.info("=" * 60)
-        logger.info("STEP 4: Export slides markdown")
+        logger.info("STEP 4: Update slides markdown with transcript")
         logger.info("=" * 60)
 
         markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
-        if ocr_pipeline is None:
-            ocr_pipeline = build_default_ocr_pipeline()
         export_slides_json(
             video_path,
             slide_metadata,
@@ -218,12 +236,14 @@ def process_video(
     logger.info("=" * 60)
     logger.info("PROCESSING COMPLETE")
     logger.info("=" * 60)
-    if not skip_slides:
-        logger.info(f"✓ Extracted {len(slide_metadata)} slides")
-    if not skip_transcription:
+    if has_slides:
+        action = "Loaded" if resume_from_slides else "Extracted"
+        logger.info(f"✓ {action} {len(slide_metadata)} slides")
+    if has_transcript:
         logger.info("✓ Transcribed audio")
-    if not skip_slides and not skip_transcription:
-        logger.info("✓ Created slides.json with transcript")
+    if has_slides:
+        status = "with transcript" if has_transcript else "(checkpoint saved)"
+        logger.info(f"✓ Created slides markdown {status}")
     logger.info(f"✓ All outputs in: {output_dir}")
 
     return results

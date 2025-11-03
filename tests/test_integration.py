@@ -15,32 +15,7 @@ from slidegeist.pipeline import process_video
 
 def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure process_video writes slides.json and returns paths."""
-
-    class _IntegrationOcrStub:
-        class _PrimaryStub:
-            is_available = True
-
-        _primary = _PrimaryStub()
-
-        def process(self, image_path: Path, transcript_full_text: str, transcript_segments: list[dict[str, Any]]) -> dict[str, Any]:
-            return {
-                "engine": {
-                    "primary": "stub",
-                    "primary_version": "1.0",
-                    "refiner": "stub",
-                    "refiner_version": "1.0",
-                },
-                "raw_text": "raw",
-                "final_text": "refined",
-                "blocks": [],
-                "visual_elements": ["box"],
-                "model_response": "{\"text\":\"refined\"}",
-            }
-
-    monkeypatch.setattr(
-        "slidegeist.pipeline.build_default_ocr_pipeline",
-        lambda: _IntegrationOcrStub(),
-    )
+    # OCR is disabled by default now, no need to mock it
 
     def fake_detect_scenes(*_: Any, **__: Any) -> list[float]:
         return [2.0]
@@ -106,7 +81,7 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
     # Default mode: single slides.md file with 1-based numbering
     assert "## Slide 1" in slides_content
     assert "Hello" in slides_content
-    assert "refined" in slides_content  # OCR content
+    # OCR disabled by default, no "refined" content expected
 
     # Should not have separate slide files in default mode
     slide_001_md = output_dir / "slide_001.md"

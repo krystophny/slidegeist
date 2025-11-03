@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import cv2
-
-from slidegeist.ocr import OcrPipeline, build_default_ocr_pipeline
+from slidegeist.ocr import OcrPipeline
 from slidegeist.transcribe import Segment
 
 logger = logging.getLogger(__name__)
@@ -20,19 +18,23 @@ def export_slides_json(
     slide_metadata: list[tuple[int, float, float, Path]],
     transcript_segments: list[Segment],
     output_path: Path,
-    model: str,
+    model: str = "",
     ocr_pipeline: OcrPipeline | None = None,
     source_url: str | None = None,
     split_slides: bool = False,
 ) -> None:
     """Export slides as Markdown file(s).
 
+    Can be called at any stage:
+    - After slide extraction (empty transcript_segments)
+    - After transcription (with transcript_segments)
+
     Args:
         video_path: Path to the source video file.
         slide_metadata: List of (index, start, end, image_path) tuples.
-        transcript_segments: Transcript segments from Whisper.
+        transcript_segments: Transcript segments from Whisper (can be empty list).
         output_path: Path for the output markdown file.
-        model: Whisper model name used for transcription.
+        model: Whisper model name used for transcription (empty if no transcription yet).
         ocr_pipeline: Optional OCR pipeline for text extraction.
         source_url: Optional source URL for the video.
         split_slides: If True, create separate files (index.md + slide_NNN.md).
@@ -41,14 +43,16 @@ def export_slides_json(
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # OCR disabled by default - can be enabled by passing ocr_pipeline
     if ocr_pipeline is None:
-        ocr_pipeline = build_default_ocr_pipeline()
+        from slidegeist.ocr import NoOpPipeline
+        ocr_pipeline = NoOpPipeline()
 
     logger.info("Creating slides markdown with %d slides", len(slide_metadata))
 
     # Process all slides and collect data
-    slide_sections: List[str] = []
-    index_lines: List[str] = []
+    slide_sections: list[str] = []
+    index_lines: list[str] = []
     total_slides = len(slide_metadata)
 
     for index, (slide_index, t_start, t_end, image_path) in enumerate(slide_metadata):
@@ -143,12 +147,12 @@ def export_slides_json(
 
 
 def _collect_transcript_text(
-    transcript_segments: List[Segment],
+    transcript_segments: list[Segment],
     start_time: float,
     end_time: float,
 ) -> str:
     """Collect transcript text overlapping the slide interval."""
-    texts: List[str] = []
+    texts: list[str] = []
     for segment in transcript_segments:
         seg_start = segment["start"]
         seg_end = segment["end"]
@@ -161,12 +165,12 @@ def _collect_transcript_text(
 
 
 def _collect_transcript_payload(
-    transcript_segments: List[Segment],
+    transcript_segments: list[Segment],
     start_time: float,
     end_time: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Filter transcript segments to those overlapping the slide interval."""
-    segments: List[Dict[str, Any]] = []
+    segments: list[dict[str, Any]] = []
 
     for segment in transcript_segments:
         seg_start = segment["start"]
@@ -211,7 +215,7 @@ def _build_slide_section(
     image_filename: str,
     transcript_text: str,
     ocr_text: str,
-    visual_elements: List[str],
+    visual_elements: list[str],
 ) -> str:
     """Build Markdown section for a slide in combined mode."""
     slide_id = f"slide_{slide_index:03d}"
@@ -256,7 +260,7 @@ def _build_slide_markdown(
     image_filename: str,
     transcript_text: str,
     ocr_text: str,
-    visual_elements: List[str],
+    visual_elements: list[str],
 ) -> str:
     """Build Markdown content for a single slide in split mode."""
     lines = [
@@ -302,8 +306,8 @@ def _build_combined_markdown(
     source_url: str | None,
     duration: float,
     model: str,
-    index_lines: List[str],
-    slide_sections: List[str],
+    index_lines: list[str],
+    slide_sections: list[str],
 ) -> str:
     """Build combined markdown file with header, index, and all slides."""
     lines = [
@@ -339,7 +343,7 @@ def _build_index_markdown(
     source_url: str | None,
     duration: float,
     model: str,
-    slide_lines: List[str],
+    slide_lines: list[str],
 ) -> str:
     """Build the index Markdown file for split mode."""
     lines = [
