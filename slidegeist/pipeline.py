@@ -510,14 +510,15 @@ def process_video(
                 mark_stage_failed(output_dir, "ai_description", error_msg)
             else:
                 logger.info(f"Using {describer.name} for AI descriptions")
+                markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
+
                 ai_descriptions = run_ai_descriptions(
                     slide_metadata,
                     transcript_segments,
                     describer,
                     ocr_pipeline,
+                    output_path=markdown_path,
                 )
-
-                markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
                 export_slides_json(
                     video_path,
                     slide_metadata,

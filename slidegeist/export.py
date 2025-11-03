@@ -50,7 +50,7 @@ def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
             # Extract slide ID
             try:
                 current_slide_id = line.split('name="')[1].split('"')[0]
-                slides_data.setdefault(current_slide_id, {"transcript": "", "ocr": "", "visual_elements": ""})
+                slides_data.setdefault(current_slide_id, {"transcript": "", "ocr": "", "visual_elements": "", "ai_description": ""})
                 current_section = None
             except Exception:
                 current_slide_id = None
@@ -76,6 +76,13 @@ def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
                 slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
             current_section = "visual_elements"
             current_content = [line]  # Include the header
+            continue
+
+        if line.strip() == "### AI Description (for reconstruction)":
+            if current_slide_id and current_section:
+                slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
+            current_section = "ai_description"
+            current_content = []
             continue
 
         # Skip separator lines
@@ -476,14 +483,16 @@ def run_ai_descriptions(
     transcript_segments: list[Segment],
     describer: TorchQwen3Describer,
     ocr_pipeline: OcrPipeline | None = None,
+    output_path: Path | None = None,
 ) -> dict[str, str]:
-    """Run AI descriptions on all slides.
+    """Run AI descriptions on all slides with incremental saving.
 
     Args:
         slide_metadata: List of (index, start, end, image_path) tuples.
         transcript_segments: Transcript segments for context.
         describer: AI describer instance.
         ocr_pipeline: OCR pipeline to extract text (optional).
+        output_path: Path to slides.md for incremental updates (optional).
 
     Returns:
         Dictionary mapping slide_id to AI description.
@@ -492,10 +501,25 @@ def run_ai_descriptions(
 
     descriptions: dict[str, str] = {}
 
+    # Load existing descriptions to skip already processed slides
+    existing_data = {}
+    if output_path and output_path.exists():
+        existing_data = _parse_existing_markdown(output_path)
+        # Count how many already have AI descriptions
+        existing_count = sum(1 for data in existing_data.values() if data.get("ai_description"))
+        if existing_count > 0:
+            logger.info(f"Found {existing_count} existing AI descriptions, will skip those slides")
+
     for slide_index, t_start, t_end, image_path in tqdm(
         slide_metadata, desc="Generating AI descriptions", unit="slide"
     ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
+
+        # Skip if already has AI description
+        if slide_id in existing_data and existing_data[slide_id].get("ai_description"):
+            descriptions[slide_id] = existing_data[slide_id]["ai_description"]
+            logger.debug(f"Skipping {slide_id} (already has AI description)")
+            continue
 
         transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
 
@@ -511,6 +535,13 @@ def run_ai_descriptions(
             description = describer.describe(image_path, transcript_text, ocr_text)
             if description:
                 descriptions[slide_id] = description
+                logger.info(f"Generated AI description for {slide_id}")
+
+                # Immediately save to disk for crash recovery
+                if output_path:
+                    _save_incremental_ai_description(
+                        output_path, slide_id, description, existing_data
+                    )
             else:
                 logger.warning(f"Empty AI description for {slide_id}")
         except Exception as exc:
@@ -518,6 +549,88 @@ def run_ai_descriptions(
             raise
 
     return descriptions
+
+
+def _save_incremental_ai_description(
+    output_path: Path,
+    slide_id: str,
+    ai_description: str,
+    existing_data: dict[str, dict[str, str]]
+) -> None:
+    """Update slides.md with new AI description for a single slide.
+
+    Args:
+        output_path: Path to slides.md file.
+        slide_id: Slide identifier (e.g., "slide_001").
+        ai_description: Generated AI description text.
+        existing_data: Parsed existing markdown data.
+    """
+    if not output_path.exists():
+        logger.warning(f"Cannot save incremental update: {output_path} does not exist")
+        return
+
+    try:
+        content = output_path.read_text(encoding="utf-8")
+        lines = content.split("\n")
+
+        # Find the slide section
+        slide_anchor = f'<a name="{slide_id}"></a>'
+        slide_start = None
+        for i, line in enumerate(lines):
+            if slide_anchor in line:
+                slide_start = i
+                break
+
+        if slide_start is None:
+            logger.warning(f"Could not find slide {slide_id} in {output_path}")
+            return
+
+        # Find the next slide or end of file
+        next_slide_start = len(lines)
+        for i in range(slide_start + 1, len(lines)):
+            if lines[i].strip().startswith('<a name="slide_'):
+                next_slide_start = i
+                break
+
+        # Find or insert AI description section
+        ai_section_start = None
+        separator_line = None
+        for i in range(slide_start, next_slide_start):
+            if lines[i].strip() == "### AI Description (for reconstruction)":
+                ai_section_start = i
+                break
+            if lines[i].strip() == "---":
+                separator_line = i
+
+        # Remove old AI description if it exists
+        if ai_section_start is not None:
+            # Find end of AI section (next ### or ---)
+            ai_section_end = separator_line if separator_line else next_slide_start
+            for i in range(ai_section_start + 1, next_slide_start):
+                if lines[i].strip().startswith("###") or lines[i].strip() == "---":
+                    ai_section_end = i
+                    break
+            # Remove old section
+            del lines[ai_section_start:ai_section_end]
+            next_slide_start -= (ai_section_end - ai_section_start)
+            separator_line = ai_section_start if separator_line else None
+
+        # Insert new AI description before separator
+        insert_pos = separator_line if separator_line else next_slide_start
+        new_section = [
+            "### AI Description (for reconstruction)",
+            "",
+            ai_description,
+            "",
+        ]
+        lines[insert_pos:insert_pos] = new_section
+
+        # Write back
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.debug(f"Saved AI description for {slide_id} to {output_path}")
+
+    except Exception as exc:
+        logger.warning(f"Failed to save incremental AI description for {slide_id}: {exc}")
 
 
 def _build_index_markdown(
