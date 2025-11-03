@@ -125,7 +125,7 @@ class TorchQwen3Describer:
 
         try:
             import torch  # type: ignore[import-untyped]
-            from transformers import (  # type: ignore[import-untyped]
+            from transformers import (  # type: ignore[import-untyped,import-not-found]
                 AutoProcessor,
                 Qwen3VLForConditionalGeneration,
             )
@@ -213,7 +213,7 @@ class TorchQwen3Describer:
             self.MODEL_ID, torch_dtype=dtype, device_map=device_map
         )
 
-        if device_map is None:
+        if device_map is None and self._model is not None:
             self._model = self._model.to(self._device)
 
         self._processor = self._autoprocessor_class.from_pretrained(self.MODEL_ID)

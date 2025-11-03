@@ -256,7 +256,7 @@ Examples:
         "--out",
         type=Path,
         default=Path(DEFAULT_OUTPUT_DIR),
-        help=f"Output directory (default: video filename)"
+        help="Output directory (default: video filename)"
     )
     common_parent.add_argument(
         "--cookies-from-browser",
@@ -320,7 +320,7 @@ Examples:
     )
 
     # Slides command
-    slides_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "slides",
         parents=[common_parent, slides_parent],
         help="Extract only slides (no transcription)"

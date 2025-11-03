@@ -430,31 +430,21 @@ def process_video(
             except Exception:
                 pass
 
-    # Step 4: Update/re-run markdown export
-    # Always run export if we did any new processing, OR if OCR/AI stages need updating
+    # Step 4: OCR on slides
     has_slides = len(slide_metadata) > 0
     transcription_just_ran = not should_skip_transcription and len(transcript_segments) > 0
-    needs_ocr_update = has_slides and not completed_stages["ocr"]
-    needs_ai_update = has_slides and not completed_stages["ai_description"]
+    needs_ocr = has_slides and not completed_stages["ocr"]
 
-    # Re-export if: new transcription, need OCR, or need AI descriptions
-    should_export = has_slides and (transcription_just_ran or needs_ocr_update or needs_ai_update)
-
-    if should_export:
+    if needs_ocr:
         logger.info("=" * 60)
-        logger.info("STEP 4: Updating slides markdown")
+        logger.info("STEP 4: OCR Text Extraction")
         logger.info("=" * 60)
-
-        if needs_ocr_update:
-            logger.info("Running OCR on slides...")
-        if needs_ai_update:
-            logger.info("Generating AI descriptions...")
 
         markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
         export_slides_json(
             video_path,
             slide_metadata,
-            transcript_segments,  # Empty if transcription was skipped
+            transcript_segments,
             markdown_path,
             model,
             ocr_pipeline=ocr_pipeline,
@@ -462,6 +452,94 @@ def process_video(
             split_slides=split_slides,
         )
         results["slides_md"] = markdown_path
+    elif transcription_just_ran and has_slides:
+        logger.info("=" * 60)
+        logger.info("STEP 4: Updating markdown with transcript")
+        logger.info("=" * 60)
+
+        markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
+        export_slides_json(
+            video_path,
+            slide_metadata,
+            transcript_segments,
+            markdown_path,
+            model,
+            ocr_pipeline=ocr_pipeline,
+            source_url=source_url,
+            split_slides=split_slides,
+        )
+        results["slides_md"] = markdown_path
+
+    # Step 5: AI Descriptions
+    should_skip_ai = (
+        (completed_stages["ai_description"] and not retry_failed)
+        or (failed_stages["ai_description"] and not retry_failed)
+    )
+    needs_ai = has_slides and not completed_stages["ai_description"]
+
+    if needs_ai and not should_skip_ai:
+        logger.info("=" * 60)
+        logger.info("STEP 5: AI Slide Descriptions")
+        logger.info("=" * 60)
+
+        try:
+            from slidegeist.ai_description import build_ai_describer
+            from slidegeist.export import run_ai_descriptions
+
+            describer = build_ai_describer()
+            if describer is None:
+                error_msg = "AI describer not available\n\nTo fix:\n"
+                error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
+                error_msg += "2. For PyTorch: pip install torch transformers\n"
+                error_msg += "3. Install Qwen3-VL model (will download on first run)\n"
+                logger.error(error_msg)
+                mark_stage_failed(output_dir, "ai_description", error_msg)
+            else:
+                logger.info(f"Using {describer.name} for AI descriptions")
+                ai_descriptions = run_ai_descriptions(
+                    slide_metadata,
+                    transcript_segments,
+                    describer,
+                )
+
+                markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
+                export_slides_json(
+                    video_path,
+                    slide_metadata,
+                    transcript_segments,
+                    markdown_path,
+                    model,
+                    ocr_pipeline=ocr_pipeline,
+                    source_url=source_url,
+                    split_slides=split_slides,
+                    ai_descriptions=ai_descriptions,
+                )
+                results["slides_md"] = markdown_path
+                clear_stage_failure(output_dir, "ai_description")
+
+        except Exception as exc:
+            error_msg = f"AI description failed: {exc}\n\nTo fix:\n"
+            error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
+            error_msg += "2. For PyTorch CUDA: Install PyTorch with CUDA first\n"
+            error_msg += "3. For PyTorch CPU: pip install torch transformers\n"
+            logger.error(error_msg)
+            mark_stage_failed(output_dir, "ai_description", error_msg)
+
+    elif completed_stages["ai_description"]:
+        logger.info("=" * 60)
+        logger.info("STEP 5: AI descriptions already completed (skipping)")
+        logger.info("=" * 60)
+    elif failed_stages["ai_description"]:
+        logger.info("=" * 60)
+        logger.info("STEP 5: AI description failed previously (skipping)")
+        logger.info("=" * 60)
+        failure_file = output_dir / ".ai_description_failed"
+        if failure_file.exists():
+            try:
+                failure_msg = failure_file.read_text(encoding="utf-8")
+                logger.warning(failure_msg)
+            except Exception:
+                pass
 
     # Summary
     logger.info("=" * 60)
@@ -472,11 +550,11 @@ def process_video(
         logger.info(f"✓ {action} {len(slide_metadata)} slides")
     if completed_stages["transcription"] or transcription_just_ran:
         logger.info("✓ Transcription available")
-    if completed_stages["ocr"] or needs_ocr_update:
+    if completed_stages["ocr"] or needs_ocr:
         logger.info("✓ OCR complete")
-    if completed_stages["ai_description"] or needs_ai_update:
+    if completed_stages["ai_description"] or needs_ai:
         logger.info("✓ AI descriptions generated")
-    if should_export:
+    if results.get("slides_md"):
         logger.info("✓ Updated slides markdown")
     logger.info(f"✓ All outputs in: {output_dir}")
 

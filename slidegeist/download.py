@@ -4,7 +4,7 @@ import logging
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import yt_dlp  # type: ignore[import-untyped]
 
@@ -59,7 +59,7 @@ def check_existing_video(url: str, output_dir: Path, cookies_from_browser: Brows
     url = translate_url(url)
 
     # Extract video metadata without downloading
-    ydl_opts: Dict[str, Any] = {
+    ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
@@ -209,7 +209,7 @@ def get_video_filename(url: str, cookies_from_browser: BrowserType | None = None
     """
     url = translate_url(url)
 
-    ydl_opts: Dict[str, Any] = {
+    ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,

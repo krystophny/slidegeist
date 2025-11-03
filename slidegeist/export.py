@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from slidegeist.ai_description import MlxQwen3Describer, TorchQwen3Describer
 from slidegeist.ocr import OcrPipeline
 from slidegeist.transcribe import Segment
 
@@ -105,8 +106,7 @@ def export_slides_json(
     ocr_pipeline: OcrPipeline | None = None,
     source_url: str | None = None,
     split_slides: bool = False,
-    run_ocr: bool = True,
-    run_ai_description: bool = True,
+    ai_descriptions: dict[str, str] | None = None,
 ) -> None:
     """Export slides as Markdown file(s).
 
@@ -124,8 +124,7 @@ def export_slides_json(
         source_url: Optional source URL for the video.
         split_slides: If True, create separate files (index.md + slide_NNN.md).
                      If False (default), create single slides.md file.
-        run_ocr: If True, run OCR on slides.
-        run_ai_description: If True, generate AI descriptions.
+        ai_descriptions: Optional dict mapping slide_id to AI description.
     """
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -180,16 +179,17 @@ def export_slides_json(
                 )
                 ocr_text = ocr_payload.get("final_text", "").strip()
                 visual_elements = ocr_payload.get("visual_elements", [])
-                ai_description = ocr_payload.get("ai_description", "").strip()
             except Exception as exc:
                 logger.warning("OCR failed for %s: %s", image_path, exc)
                 ocr_text = existing_slide.get("ocr", "")
                 visual_elements = []
-                ai_description = existing_slide.get("ai_description", "")
         else:
-            # No OCR available: keep existing or empty
             ocr_text = existing_slide.get("ocr", "")
             visual_elements = []
+
+        if ai_descriptions and slide_id in ai_descriptions:
+            ai_description = ai_descriptions[slide_id]
+        else:
             ai_description = existing_slide.get("ai_description", "")
 
         time_str = f"{_format_timestamp(t_start)}-{_format_timestamp(t_end)}"
@@ -465,6 +465,43 @@ def _build_combined_markdown(
     lines.extend(slide_sections)
 
     return "\n".join(lines)
+
+
+def run_ai_descriptions(
+    slide_metadata: list[tuple[int, float, float, Path]],
+    transcript_segments: list[Segment],
+    describer: MlxQwen3Describer | TorchQwen3Describer,
+) -> dict[str, str]:
+    """Run AI descriptions on all slides.
+
+    Args:
+        slide_metadata: List of (index, start, end, image_path) tuples.
+        transcript_segments: Transcript segments for context.
+        describer: AI describer instance.
+
+    Returns:
+        Dictionary mapping slide_id to AI description.
+    """
+    descriptions: dict[str, str] = {}
+    total_slides = len(slide_metadata)
+
+    for idx, (slide_index, t_start, t_end, image_path) in enumerate(slide_metadata, start=1):
+        slide_id = image_path.stem or f"slide_{slide_index:03d}"
+
+        transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
+
+        try:
+            description = describer.describe(image_path, transcript_text)
+            if description:
+                descriptions[slide_id] = description
+                logger.info(f"AI description {idx}/{total_slides}: {slide_id}")
+            else:
+                logger.warning(f"Empty AI description for {slide_id}")
+        except Exception as exc:
+            logger.error(f"AI description failed for {slide_id}: {exc}")
+            raise
+
+    return descriptions
 
 
 def _build_index_markdown(
