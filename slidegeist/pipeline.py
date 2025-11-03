@@ -478,6 +478,20 @@ def process_video(
     needs_ai = has_slides and not completed_stages["ai_description"]
 
     if needs_ai and not should_skip_ai:
+        # Free GPU memory before loading vision model
+        logger.info("Freeing GPU memory before AI descriptions...")
+        try:
+            import gc
+            import torch  # type: ignore[import-untyped]
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("GPU memory cleared")
+        except ImportError:
+            pass  # PyTorch not installed, skip cleanup
+        except Exception as e:
+            logger.debug(f"GPU cleanup warning: {e}")
+
         logger.info("=" * 60)
         logger.info("STEP 5: AI Slide Descriptions")
         logger.info("=" * 60)
