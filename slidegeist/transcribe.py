@@ -221,16 +221,70 @@ def transcribe_video(
     logger.info(f"Transcribing: {video_path.name}")
     start_time = time.time()
 
-    # Transcribe with OpenAI Whisper
-    # Note: OpenAI Whisper shows built-in progress when verbose=True (default)
-    result = model.transcribe(
-        str(video_path),
-        word_timestamps=True,
-        compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
-        logprob_threshold=LOG_PROB_THRESHOLD,
-        no_speech_threshold=NO_SPEECH_THRESHOLD,
-        verbose=True,  # Show Whisper's built-in progress output
-    )
+    # Transcribe with OpenAI Whisper with progress bar
+    from tqdm import tqdm
+
+    # OpenAI Whisper doesn't have built-in progress callbacks, so we use verbose output
+    # and wrap it with tqdm to show progress based on printed segments
+    import io
+    import contextlib
+
+    if video_duration and video_duration > 0:
+        # Show progress bar based on estimated duration
+        pbar = tqdm(total=int(video_duration), unit="s", desc="Transcribing", ncols=100)
+
+        # Capture verbose output to update progress
+        class ProgressCapture:
+            def __init__(self, pbar, start_time):
+                self.pbar = pbar
+                self.start_time = start_time
+                self.last_position = 0
+
+            def write(self, text):
+                # Parse progress from Whisper's output (shows timestamps)
+                import re
+                # Look for timestamp patterns like [00:01.000 --> 00:05.000]
+                match = re.search(r'\[(\d+):(\d+)\.(\d+) --> (\d+):(\d+)\.(\d+)\]', text)
+                if match:
+                    # Calculate end time in seconds
+                    end_min, end_sec = int(match.group(4)), int(match.group(5))
+                    position = end_min * 60 + end_sec
+                    if position > self.last_position:
+                        self.pbar.update(position - self.last_position)
+                        self.last_position = position
+
+            def flush(self):
+                pass
+
+        progress_capture = ProgressCapture(pbar, start_time)
+
+        # Redirect stderr to capture Whisper's verbose output
+        import sys
+        old_stderr = sys.stderr
+        sys.stderr = progress_capture
+
+        try:
+            result = model.transcribe(
+                str(video_path),
+                word_timestamps=True,
+                compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
+                logprob_threshold=LOG_PROB_THRESHOLD,
+                no_speech_threshold=NO_SPEECH_THRESHOLD,
+                verbose=True,
+            )
+        finally:
+            sys.stderr = old_stderr
+            pbar.close()
+    else:
+        # No duration info, just show indeterminate progress
+        result = model.transcribe(
+            str(video_path),
+            word_timestamps=True,
+            compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
+            logprob_threshold=LOG_PROB_THRESHOLD,
+            no_speech_threshold=NO_SPEECH_THRESHOLD,
+            verbose=False,
+        )
 
     # Extract segments
     segments_list: list[Segment] = []
