@@ -388,12 +388,12 @@ def process_video(
         )
         results["slides_md"] = markdown_path
 
-    # Step 3: Transcription (skip if already done or failed without retry)
+    # Step 3: Transcription (skip if already done, or failed without retry)
     transcript_segments = []
     should_skip_transcription = (
         skip_transcription
-        or (completed_stages["transcription"] and not retry_failed)
-        or (failed_stages["transcription"] and not retry_failed)
+        or completed_stages["transcription"]  # Always skip if completed
+        or (failed_stages["transcription"] and not retry_failed)  # Skip failed unless retrying
     )
 
     if not should_skip_transcription:
