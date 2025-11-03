@@ -295,23 +295,13 @@ class TorchQwen3Describer:
         logger.info(f"Loading {self.MODEL_ID}...")
 
         if self._device == "cuda":
-            # AWQ quantized model with GPU + CPU offloading
-            # Allocate 14GB to GPU, rest to CPU (model is ~17GB total)
-            import psutil
-            cpu_memory_gb = int(psutil.virtual_memory().available / (1024**3))
-
-            max_memory = {
-                0: "14GiB",  # Leave 2GB for other processes and activations
-                "cpu": f"{min(cpu_memory_gb - 8, 32)}GiB"  # Reserve 8GB for system
-            }
-
-            logger.info(f"Loading with GPU+CPU offload: GPU=14GB, CPU={max_memory['cpu']}")
+            # AWQ quantized model - must fit entirely on GPU (no CPU offload)
+            logger.info("Loading AWQ model on GPU (no CPU offload)")
 
             self._model = self._qwen3vl_class.from_pretrained(
                 self.MODEL_ID,
                 dtype=self._torch.float16,  # AWQ works best with float16
-                device_map="auto",
-                max_memory=max_memory,
+                device_map="cuda:0",  # Force GPU-only
                 trust_remote_code=True
             )
         else:
