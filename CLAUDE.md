@@ -152,10 +152,12 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 - opencv-python: Video frame extraction
 - pytesseract: OCR
 - yt-dlp: Video download from URLs
+- tqdm: Progress bars
 
 **Optional:**
 - mlx-whisper: Apple Silicon optimized Whisper
 - mlx-vlm: Apple Silicon optimized vision models (Qwen3-VL)
+- torch, transformers, torchvision, accelerate: PyTorch-based Qwen3-VL for CUDA/CPU
 
 **Dev:**
 - pytest, pytest-cov: Testing

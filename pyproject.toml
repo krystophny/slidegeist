@@ -31,12 +31,19 @@ dependencies = [
     "yt-dlp>=2024.0.0",
     "pytesseract>=0.3.10",
     "Pillow>=10.0.0",
+    "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
 mlx = [
     "mlx-whisper>=0.1.0",
     "mlx-vlm>=0.3.4",
+]
+torch = [
+    "torch>=2.0.0",
+    "transformers>=4.37.0",
+    "torchvision>=0.15.0",
+    "accelerate>=0.26.0",
 ]
 dev = [
     "pytest>=7.0",

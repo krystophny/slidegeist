@@ -38,8 +38,10 @@ winget install ffmpeg
 pip install slidegeist
 ```
 
-- Apple Silicon users can get MLX acceleration with `pip install "slidegeist[mlx]"`.
-- Enable Whisper CUDA builds by installing PyTorch with CUDA before Slidegeist.
+**Optional AI features:**
+- Apple Silicon: `pip install "slidegeist[mlx]"` for MLX acceleration and Qwen3-VL descriptions
+- CUDA/CPU: `pip install "slidegeist[torch]"` for PyTorch-based Qwen3-VL descriptions
+- Enable Whisper CUDA builds by installing PyTorch with CUDA before Slidegeist
 
 ### Developer Setup
 
