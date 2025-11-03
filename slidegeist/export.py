@@ -226,10 +226,17 @@ def export_slides_json(
             per_slide_path = output_dir / f"{slide_id}.md"
             per_slide_path.write_text(markdown_content, encoding="utf-8")
 
-            index_lines.append(
-                f"{slide_index}. [Slide {slide_index}]({slide_id}.md) • "
-                f"[![thumb](slides/{image_filename})]({slide_id}.md) • {time_str}"
-            )
+            # Only show timestamp for videos (not PDFs)
+            if t_start > 0 or t_end > 0:
+                index_lines.append(
+                    f"{slide_index}. [Slide {slide_index}]({slide_id}.md) • "
+                    f"[![thumb](slides/{image_filename})]({slide_id}.md) • {time_str}"
+                )
+            else:
+                index_lines.append(
+                    f"{slide_index}. [Slide {slide_index}]({slide_id}.md) • "
+                    f"[![thumb](slides/{image_filename})]({slide_id}.md)"
+                )
             logger.debug("Wrote slide %s (%d/%d)", per_slide_path, index + 1, total_slides)
         else:
             # Single file mode: collect sections only (no table of contents)
@@ -492,21 +499,32 @@ def _build_combined_markdown(
     slide_sections: list[str],
 ) -> str:
     """Build combined markdown file with header, index, and all slides."""
+    is_pdf = video_path.suffix.lower() == ".pdf"
+
     lines = [
         "# Lecture Slides",
         "",
-        f"**Video:** {video_path.name}  ",
     ]
+
+    if is_pdf:
+        lines.append(f"**PDF:** {video_path.name}  ")
+    else:
+        lines.append(f"**Video:** {video_path.name}  ")
 
     if source_url:
         lines.append(f"**Source:** {source_url}  ")
 
-    duration_str = _format_timestamp(duration)
     processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    # Only show duration and transcription model for videos
+    if not is_pdf:
+        duration_str = _format_timestamp(duration)
+        lines.extend([
+            f"**Duration:** {duration_str}  ",
+            f"**Transcription Model:** {model}  ",
+        ])
+
     lines.extend([
-        f"**Duration:** {duration_str}  ",
-        f"**Transcription Model:** {model}  ",
         f"**Processed:** {processed_at}",
         "",
         "---",
@@ -690,21 +708,32 @@ def _build_index_markdown(
     slide_lines: list[str],
 ) -> str:
     """Build the index Markdown file for split mode."""
+    is_pdf = video_path.suffix.lower() == ".pdf"
+
     lines = [
         "# Lecture Slides",
         "",
-        f"**Video:** {video_path.name}  ",
     ]
+
+    if is_pdf:
+        lines.append(f"**PDF:** {video_path.name}  ")
+    else:
+        lines.append(f"**Video:** {video_path.name}  ")
 
     if source_url:
         lines.append(f"**Source:** {source_url}  ")
 
-    duration_str = _format_timestamp(duration)
     processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    # Only show duration and transcription model for videos
+    if not is_pdf:
+        duration_str = _format_timestamp(duration)
+        lines.extend([
+            f"**Duration:** {duration_str}  ",
+            f"**Transcription Model:** {model}  ",
+        ])
+
     lines.extend([
-        f"**Duration:** {duration_str}  ",
-        f"**Transcription Model:** {model}  ",
         f"**Processed:** {processed_at}",
         "",
         "## Slides",
