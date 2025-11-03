@@ -1,7 +1,6 @@
 """AI slide description for reconstruction."""
 
 import logging
-import platform
 import re
 from pathlib import Path
 
@@ -114,36 +113,37 @@ OUTPUT REQUIREMENTS:
 - Prioritize accuracy over brevity"""
 
 
-class MlxQwen3Describer:
-    """AI slide describer using Qwen3-VL via MLX (Apple Silicon only)."""
+class LlamaCppQwen3Describer:
+    """AI slide describer using Qwen3-VL via llama.cpp (CUDA/CPU with GPU offload)."""
 
-    MODEL_ID = "lmstudio-community/Qwen3-VL-8B-Instruct-MLX-4bit"
+    # Qwen3-VL-30B-A3B GGUF models from unsloth
+    MODEL_ID = "unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF"
+    MODEL_FILE = "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf"
+    MMPROJ_FILE = "mmproj-Qwen3-VL-30B-A3B-Instruct-f16.gguf"
 
-    def __init__(self, max_new_tokens: int = 2048, temperature: float = 0.3) -> None:
-        self.name = "Qwen3-VL-8B (MLX)"
+    def __init__(
+        self,
+        max_new_tokens: int = 2048,
+        temperature: float = 0.3,
+        n_gpu_layers: int = 50,
+        main_gpu: int = 0,
+    ) -> None:
+        self.name = "Qwen3-VL-30B (llama.cpp)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self._model = None
-        self._processor = None
-        self._config = None
+        self.n_gpu_layers = n_gpu_layers
+        self.main_gpu = main_gpu
+        self._llm = None
         self._available = False
 
-        if platform.system() != "Darwin" or platform.machine() != "arm64":
-            return
-
         try:
-            import mlx_vlm  # type: ignore
-            from mlx_vlm import generate, load  # type: ignore
-            from mlx_vlm.prompt_utils import apply_chat_template  # type: ignore
+            import llama_cpp  # type: ignore[import-untyped]
 
-            self._load = load
-            self._generate = generate
-            self._apply_chat_template = apply_chat_template
-            self.version = getattr(mlx_vlm, "__version__", None)
+            self._llama_cpp = llama_cpp
             self._available = True
-            logger.info("MLX-VLM available for Qwen3-VL descriptions")
+            logger.info("llama-cpp-python available for Qwen3-VL descriptions")
         except ImportError:
-            logger.debug("mlx-vlm not installed")
+            logger.debug("llama-cpp-python not installed")
 
     def is_available(self) -> bool:
         return self._available
@@ -153,185 +153,106 @@ class MlxQwen3Describer:
             return ""
 
         self._ensure_loaded()
-        if self._model is None or self._processor is None:
+        if self._llm is None:
             return ""
 
         system_instruction = get_system_instruction()
         user_text = get_user_prompt(transcript, ocr_text)
 
+        # Convert image to data URI for llama-cpp-python
+        import base64
+
+        with open(image_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+        image_uri = f"data:image/jpeg;base64,{image_data}"
+
         messages = [
-            {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
-            {"role": "user", "content": [
-                {"type": "image", "image": str(image_path)},
-                {"type": "text", "text": user_text},
-            ]},
+            {"role": "system", "content": system_instruction},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_uri}},
+                    {"type": "text", "text": user_text},
+                ],
+            },
         ]
 
-        formatted = self._apply_chat_template(  # type: ignore
-            self._processor, self._config, messages, add_generation_prompt=True
-        )
-
-        output = self._generate(  # type: ignore
-            self._model,
-            self._processor,
-            formatted,
-            images=[str(image_path)],
+        response = self._llm.create_chat_completion(
+            messages=messages,
             max_tokens=self.max_new_tokens,
             temperature=self.temperature,
+        )
+
+        raw_output = response["choices"][0]["message"]["content"]
+        return clean_text(raw_output)
+
+    def _ensure_loaded(self) -> None:
+        if self._llm is not None:
+            return
+
+        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
+
+        logger.info(f"Loading {self.MODEL_ID}...")
+        logger.info(
+            f"GPU layers: {self.n_gpu_layers}, "
+            f"GPU: {self.main_gpu}, "
+            f"Max tokens: {self.max_new_tokens}"
+        )
+
+        # Download model and mmproj if needed
+        model_path = self._download_model(self.MODEL_FILE)
+        mmproj_path = self._download_model(self.MMPROJ_FILE)
+
+        # Initialize chat handler with mmproj
+        chat_handler = Qwen25VLChatHandler(clip_model_path=str(mmproj_path), verbose=False)
+
+        # Load model with GPU offload
+        self._llm = self._llama_cpp.Llama(
+            model_path=str(model_path),
+            chat_handler=chat_handler,
+            n_gpu_layers=self.n_gpu_layers,
+            main_gpu=self.main_gpu,
+            n_ctx=4096,
             verbose=False,
         )
 
-        raw_output = self._extract_text(output)
-        return clean_text(raw_output)
+    def _download_model(self, filename: str) -> Path:
+        """Download model file from HuggingFace if needed."""
+        from pathlib import Path
 
-    def _extract_text(self, output: str | dict) -> str:
-        """Extract text from model output."""
-        if isinstance(output, str):
-            return output.strip()
-        elif isinstance(output, dict):
-            return str(output.get("choices", [{}])[0].get("text", "")).strip()
-        return str(output).strip()
+        cache_dir = Path.home() / ".cache" / "slidegeist" / "models"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        model_file = cache_dir / filename
 
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
+        if model_file.exists():
+            logger.info(f"Using cached model: {model_file}")
+            return model_file
 
-        logger.info(f"Loading {self.MODEL_ID}...")
-        self._model, self._processor = self._load(self.MODEL_ID)  # type: ignore
-        self._config = getattr(self._model, "config", None)
-
-
-class TorchQwen3Describer:
-    """AI slide describer using Qwen3-VL via PyTorch (CUDA/CPU)."""
-
-    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
-
-    def __init__(self, max_new_tokens: int = 2048, temperature: float = 0.3) -> None:
-        self.max_new_tokens = max_new_tokens
-        self.temperature = temperature
-        self._model = None
-        self._processor = None
-        self._available = False
-        self._device = "cpu"
-
+        logger.info(f"Downloading {filename} from HuggingFace...")
         try:
-            import torch  # type: ignore[import-untyped]
-            from transformers import (  # type: ignore[import-untyped,import-not-found]
-                AutoModelForVision2Seq,
-                AutoProcessor,
+            from huggingface_hub import hf_hub_download  # type: ignore[import-untyped]
+
+            downloaded_path = hf_hub_download(
+                repo_id=self.MODEL_ID, filename=filename, cache_dir=str(cache_dir)
             )
-
-            self._torch = torch
-            self._qwen3vl_class = AutoModelForVision2Seq
-            self._autoprocessor_class = AutoProcessor
-
-            if torch.cuda.is_available():
-                self._device = "cuda"
-                self.name = "Qwen3-VL-8B (CUDA)"
-                logger.info("PyTorch CUDA available for Qwen3-VL")
-            else:
-                self._device = "cpu"
-                self.name = "Qwen3-VL-8B (CPU)"
-                logger.info("PyTorch CPU available for Qwen3-VL")
-
-            self._available = True
+            return Path(downloaded_path)
         except ImportError:
-            logger.debug("PyTorch or transformers not available")
-
-    def is_available(self) -> bool:
-        return self._available
-
-    def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:
-        if not self._available:
-            return ""
-
-        self._ensure_loaded()
-        if self._model is None or self._processor is None:
-            return ""
-
-        system_instruction = get_system_instruction()
-        user_text = get_user_prompt(transcript, ocr_text)
-        combined_text = f"{system_instruction}\n\n{user_text}"
-
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "image", "image": str(image_path.absolute())},
-                {"type": "text", "text": combined_text},
-            ]
-        }]
-
-        inputs = self._processor.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True,
-            return_dict=True, return_tensors="pt"
-        )
-        inputs.pop("token_type_ids", None)
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
-
-        generated_ids = self._model.generate(
-            **inputs,
-            max_new_tokens=self.max_new_tokens,
-            do_sample=True,
-            temperature=self.temperature,
-        )
-
-        generated_ids_trimmed = [
-            out_ids[len(in_ids):]
-            for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
-        ]
-        output_text = self._processor.batch_decode(
-            generated_ids_trimmed,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )
-
-        raw_output = output_text[0].strip() if output_text else ""
-        return clean_text(raw_output)
-
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
-
-        logger.info(f"Loading {self.MODEL_ID}...")
-
-        if self._device == "cuda":
-            # Load model on GPU with automatic device mapping
-            logger.info("Loading model on GPU")
-
-            self._model = self._qwen3vl_class.from_pretrained(
-                self.MODEL_ID,
-                torch_dtype=self._torch.float16,
-                device_map="auto",
-                trust_remote_code=True
+            raise ImportError(
+                "huggingface_hub not installed. Install with: pip install huggingface-hub"
             )
-        else:
-            # CPU only
-            logger.info("Loading on CPU (this will be slow)")
-            self._model = self._qwen3vl_class.from_pretrained(
-                self.MODEL_ID,
-                torch_dtype=self._torch.float32
-            )
-            if self._model is not None:
-                self._model = self._model.to(self._device)
-
-        self._processor = self._autoprocessor_class.from_pretrained(
-            self.MODEL_ID, trust_remote_code=True
-        )
+        except Exception as e:
+            raise RuntimeError(f"Failed to download {filename}: {e}") from e
 
 
-def build_ai_describer() -> MlxQwen3Describer | TorchQwen3Describer | None:
-    """Build AI describer using best available backend."""
+def build_ai_describer() -> LlamaCppQwen3Describer | None:
+    """Build AI describer using llama.cpp."""
     import os
 
     if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() in {"1", "true", "yes"}:
         return None
 
-    mlx = MlxQwen3Describer()
-    if mlx.is_available():
-        return mlx
-
-    torch_desc = TorchQwen3Describer()
-    if torch_desc.is_available():
-        return torch_desc
+    describer = LlamaCppQwen3Describer()
+    if describer.is_available():
+        return describer
 
     return None

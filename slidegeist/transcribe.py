@@ -1,4 +1,4 @@
-"""Audio transcription using faster-whisper."""
+"""Audio transcription using whisper.cpp."""
 
 import logging
 import platform
@@ -8,53 +8,11 @@ from pathlib import Path
 from typing import TypedDict
 
 from slidegeist.constants import (
-    COMPRESSION_RATIO_THRESHOLD,
     DEFAULT_DEVICE,
     DEFAULT_WHISPER_MODEL,
-    LOG_PROB_THRESHOLD,
-    NO_SPEECH_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def is_mlx_available() -> bool:
-    """Check if MLX is available (Apple Silicon Mac).
-
-    Returns:
-        True if running on Apple Silicon with MLX support, False otherwise.
-    """
-    # Allow user to completely disable MLX if it causes hard crashes
-    import os
-    if os.getenv("SLIDEGEIST_DISABLE_MLX", "").lower() in {"1", "true", "yes"}:
-        logger.info("MLX disabled via SLIDEGEIST_DISABLE_MLX environment variable")
-        return False
-
-    # Check if we're on macOS ARM64 (Apple Silicon)
-    if platform.system() != "Darwin":
-        return False
-    if platform.machine() != "arm64":
-        return False
-
-    # Check if mlx-whisper is importable without actually importing it
-    # NOTE: Even find_spec() can trigger hard crashes if MLX C++ bindings are corrupted
-    # If experiencing hard crashes (macOS crash dialog), set SLIDEGEIST_DISABLE_MLX=1
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec("mlx_whisper")
-        if spec is None:
-            return False
-
-        # Additional safety: check if we can at least import the package
-        # This is still risky but necessary for validation
-        logger.debug("MLX package found, attempting validation import")
-        return True
-    except (ImportError, ValueError, AttributeError):
-        return False
-    except Exception as e:
-        # Catch any other errors including potential crashes during spec lookup
-        logger.warning(f"MLX detection failed: {e}")
-        return False
 
 
 def is_cuda_available() -> bool:
@@ -104,128 +62,50 @@ def transcribe_video(
     device: str = DEFAULT_DEVICE,
     compute_type: str = "int8",
 ) -> TranscriptResult:
-    """Transcribe video audio using faster-whisper.
+    """Transcribe video audio using whisper.cpp.
 
     Args:
         video_path: Path to the video file.
         model_size: Whisper model size: tiny, base, small, medium, large-v3, large-v2, large.
-        device: Device to use: 'cpu', 'cuda', or 'auto' (auto-detects MLX on Apple Silicon).
-        compute_type: Computation type for CTranslate2.
-                     Use 'int8' for CPU, 'float16' for GPU.
+        device: Device to use: 'cpu', 'cuda', or 'auto' (auto-detects best available).
+        compute_type: Unused, kept for API compatibility.
 
     Returns:
         Dictionary with language and segments containing timestamped text.
 
     Raises:
-        ImportError: If faster-whisper is not installed.
+        ImportError: If pywhispercpp is not installed.
         Exception: If transcription fails.
     """
     try:
-        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+        from pywhispercpp.model import Model  # type: ignore[import-untyped]
     except ImportError:
-        raise ImportError("faster-whisper not installed. Install with: pip install faster-whisper")
+        raise ImportError("pywhispercpp not installed. Install with: pip install pywhispercpp")
 
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
     # Auto-detect best available device
-    use_mlx = False
     if device == "auto":
-        if is_mlx_available():
-            use_mlx = True
-            device = "cpu"  # MLX uses its own backend
-            logger.info("MLX detected - using MLX-optimized Whisper for Apple Silicon")
-        elif is_cuda_available():
+        if is_cuda_available():
             device = "cuda"
             logger.info("CUDA GPU detected - using GPU acceleration")
-        elif platform.system() == "Darwin" and platform.machine() == "arm64":
-            device = "cpu"
-            logger.info(
-                "Apple Silicon detected but MLX not available, using CPU. Install with: pip install mlx-whisper"
-            )
         else:
             device = "cpu"
             logger.info("Auto-detected device: CPU")
 
-    # Use MLX-optimized transcription if available
-    if use_mlx:
-        try:
-            import mlx_whisper  # type: ignore[import-untyped, import-not-found]
-
-            # Suppress MLX verbose debug output (only after successful import)
-            try:
-                logging.getLogger("mlx").setLevel(logging.WARNING)
-                logging.getLogger("mlx_whisper").setLevel(logging.WARNING)
-            except Exception:
-                pass  # Ignore logger configuration errors
-
-            # Map faster-whisper model names to MLX model names
-            mlx_model_map = {
-                "large-v3": "mlx-community/whisper-large-v3-mlx",
-                "large-v2": "mlx-community/whisper-large-v2-mlx",
-                "large": "mlx-community/whisper-large-v2-mlx",
-                "medium": "mlx-community/whisper-medium-mlx",
-                "small": "mlx-community/whisper-small-mlx",
-                "base": "mlx-community/whisper-base-mlx",
-                "tiny": "mlx-community/whisper-tiny-mlx",
-            }
-            mlx_model = mlx_model_map.get(model_size, f"mlx-community/whisper-{model_size}-mlx")
-
-            logger.info(f"Loading MLX Whisper model: {mlx_model}")
-            result = mlx_whisper.transcribe(
-                str(video_path),
-                path_or_hf_repo=mlx_model,
-                word_timestamps=True,
-            )
-            # Convert MLX result to our format
-            mlx_segments: list[Segment] = []
-            for segment in result.get("segments", []):
-                mlx_words: list[Word] = []
-                for word in segment.get("words", []):
-                    mlx_words.append(
-                        {"word": word["word"], "start": word["start"], "end": word["end"]}
-                    )
-                mlx_segments.append(
-                    {
-                        "start": segment["start"],
-                        "end": segment["end"],
-                        "text": segment["text"].strip(),
-                        "words": mlx_words,
-                    }
-                )
-            logger.info(f"MLX transcription complete: {len(mlx_segments)} segments")
-            return {"language": result.get("language", "unknown"), "segments": mlx_segments}
-        except ImportError as e:
-            logger.warning(f"MLX import failed: {e}, falling back to faster-whisper")
-            use_mlx = False
-        except (KeyError, AttributeError, TypeError) as e:
-            logger.warning(f"MLX data format error: {e}, falling back to faster-whisper")
-            use_mlx = False
-        except Exception as e:
-            logger.error(f"MLX transcription crashed: {e}, falling back to faster-whisper")
-            logger.debug("Full traceback:", exc_info=True)
-            use_mlx = False
-
-    # Adjust compute type based on device
-    if device == "cuda" and compute_type == "int8":
-        compute_type = "float16"
-
-    # Use all available CPU cores (0 = auto-detect optimal number)
-    # This overrides the default of 4 threads
-    cpu_threads = 0
-    num_workers = 1
-
-    logger.info(f"Loading Whisper model: {model_size} on {device} (compute_type: {compute_type})")
-    if device == "cpu":
-        logger.info(f"CPU threads: auto-detect (all cores), num_workers: {num_workers}")
-
-    model = WhisperModel(
-        model_size,
-        device=device,
-        compute_type=compute_type,
-        cpu_threads=cpu_threads,
-        num_workers=num_workers,
-    )
+    # Map model names to pywhispercpp format
+    model_map = {
+        "large-v3": "large-v3",
+        "large-v3-turbo": "large-v3-turbo",
+        "large-v2": "large-v2",
+        "large": "large-v2",
+        "medium": "medium",
+        "small": "small",
+        "base": "base",
+        "tiny": "tiny",
+    }
+    whisper_model = model_map.get(model_size, model_size)
 
     # Get video duration for progress tracking
     from slidegeist.ffmpeg import get_video_duration
@@ -239,102 +119,55 @@ def transcribe_video(
         video_duration = None
         logger.warning("Could not determine video duration, progress tracking will be limited")
 
-    logger.info(f"Transcribing: {video_path.name}")
+    logger.info(f"Loading Whisper model: {whisper_model} on {device}")
     start_time = time.time()
 
-    segments_iterator, info = model.transcribe(
-        str(video_path),
-        word_timestamps=True,
-        vad_filter=True,  # Voice activity detection for better accuracy
-        compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
-        log_prob_threshold=LOG_PROB_THRESHOLD,
-        no_speech_threshold=NO_SPEECH_THRESHOLD,
-    )
-
-    # Convert iterator to list and extract data with progress tracking
-    segments_list: list[Segment] = []
-    last_progress_time = start_time
-    progress_interval = 5.0  # Update progress every 5 seconds
-
-    for segment in segments_iterator:
-        words_list: list[Word] = []
-        if segment.words:
-            for word in segment.words:
-                words_list.append({"word": word.word, "start": word.start, "end": word.end})
-
-        segments_list.append(
-            {
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text.strip(),
-                "words": words_list,
-            }
+    # Initialize model with GPU support if CUDA available
+    n_threads = 0  # Auto-detect CPU threads
+    if device == "cuda":
+        model = Model(
+            model=whisper_model,
+            n_threads=n_threads,
+            use_gpu=True,
+        )
+    else:
+        model = Model(
+            model=whisper_model,
+            n_threads=n_threads,
+            use_gpu=False,
         )
 
-        # Show progress update
-        current_time = time.time()
-        if current_time - last_progress_time >= progress_interval:
-            elapsed = current_time - start_time
-            current_position = segment.end
+    logger.info(f"Transcribing: {video_path.name}")
 
-            if video_duration and video_duration > 0:
-                progress_pct = (current_position / video_duration) * 100
-                speed_factor = current_position / elapsed if elapsed > 0 else 0
+    # Transcribe with word timestamps
+    segments = model.transcribe(
+        media=str(video_path),
+        new_segment_callback=None,  # Could add progress callback here
+        word_timestamps=True,
+    )
 
-                # Estimate remaining time
-                if speed_factor > 0:
-                    remaining_duration = video_duration - current_position
-                    eta_seconds = remaining_duration / speed_factor
-                    eta_str = f"ETA: {eta_seconds / 60:.1f}min"
-                else:
-                    eta_str = "ETA: calculating..."
+    # Convert pywhispercpp output to our format
+    segments_list: list[Segment] = []
+    detected_language = "unknown"
 
-                # Print progress bar to console (responsive to terminal width)
-                try:
-                    import shutil
-                    terminal_width = shutil.get_terminal_size((80, 20)).columns
-                except Exception:
-                    terminal_width = 80
+    for segment in segments:
+        words_list: list[Word] = []
 
-                # Calculate bar width based on terminal size
-                # Reserve space for: []  XX.X% | Pos | Speed | ETA (~60 chars)
-                bar_width = max(20, min(40, terminal_width - 65))
-                filled = int(bar_width * progress_pct / 100)
-                bar = "█" * filled + "░" * (bar_width - filled)
+        # Extract words if available (pywhispercpp uses 'words' attribute)
+        if hasattr(segment, "words") and segment.words:
+            for word in segment.words:
+                words_list.append({
+                    "word": word.word if hasattr(word, "word") else str(word),
+                    "start": word.t0 if hasattr(word, "t0") else word.start,
+                    "end": word.t1 if hasattr(word, "t1") else word.end,
+                })
 
-                progress_line = (
-                    f"\r[{bar}] {progress_pct:.1f}% | "
-                    f"{current_position / 60:.1f}/{video_duration / 60:.1f}min | "
-                    f"{speed_factor:.1f}x | {eta_str}"
-                )
-
-                # Truncate if still too long
-                if len(progress_line) > terminal_width:
-                    progress_line = progress_line[:terminal_width - 3] + "..."
-
-                print(progress_line, end="", file=sys.stderr, flush=True)
-            else:
-                # No duration info, just show position and speed
-                speed_factor = current_position / elapsed if elapsed > 0 else 0
-                try:
-                    import shutil
-                    terminal_width = shutil.get_terminal_size((80, 20)).columns
-                except Exception:
-                    terminal_width = 80
-
-                progress_line = (
-                    f"\rProcessed: {current_position / 60:.1f}min | "
-                    f"Speed: {speed_factor:.1f}x | "
-                    f"Elapsed: {elapsed / 60:.1f}min"
-                )
-
-                # Truncate if too long
-                if len(progress_line) > terminal_width:
-                    progress_line = progress_line[:terminal_width - 3] + "..."
-
-                print(progress_line, end="", file=sys.stderr, flush=True)
-
-            last_progress_time = current_time
+        segments_list.append({
+            "start": segment.t0,
+            "end": segment.t1,
+            "text": segment.text.strip(),
+            "words": words_list,
+        })
 
     # Clear progress line and show final stats
     try:
@@ -350,10 +183,9 @@ def transcribe_video(
 
     logger.info(
         f"Transcription complete: {len(segments_list)} segments, "
-        f"language: {info.language}, "
         f"time: {total_time / 60:.1f}min"
     )
     if speed_factor > 0:
         logger.info(f"Average speed: {speed_factor:.2f}x realtime")
 
-    return {"language": info.language, "segments": segments_list}
+    return {"language": detected_language, "segments": segments_list}
