@@ -109,11 +109,10 @@ def transcribe_video(
 
     logger.info(f"Transcribing: {video_path.name}")
 
-    # Transcribe with word timestamps
+    # Transcribe (whisper.cpp doesn't provide word-level timestamps via pywhispercpp)
     segments = model.transcribe(
         media=str(video_path),
         new_segment_callback=None,  # Could add progress callback here
-        word_timestamps=True,
     )
 
     # Convert pywhispercpp output to our format
@@ -121,22 +120,12 @@ def transcribe_video(
     detected_language = "unknown"
 
     for segment in segments:
-        words_list: list[Word] = []
-
-        # Extract words if available (pywhispercpp uses 'words' attribute)
-        if hasattr(segment, "words") and segment.words:
-            for word in segment.words:
-                words_list.append({
-                    "word": word.word if hasattr(word, "word") else str(word),
-                    "start": word.t0 if hasattr(word, "t0") else word.start,
-                    "end": word.t1 if hasattr(word, "t1") else word.end,
-                })
-
+        # pywhispercpp doesn't provide word-level timestamps
         segments_list.append({
-            "start": segment.t0,
-            "end": segment.t1,
+            "start": segment.t0 / 1000.0,  # Convert ms to seconds
+            "end": segment.t1 / 1000.0,
             "text": segment.text.strip(),
-            "words": words_list,
+            "words": [],  # No word-level data available
         })
 
     # Clear progress line and show final stats
