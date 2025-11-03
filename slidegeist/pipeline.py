@@ -275,6 +275,7 @@ def process_video(
     split_slides: bool = False,
     ocr_pipeline: OcrPipeline | None = None,
     retry_failed: bool = False,
+    force_redo_ai: bool = False,
 ) -> dict[str, Path | list[Path]]:
     """Process a video and return generated artifacts.
 
@@ -518,6 +519,7 @@ def process_video(
                     describer,
                     ocr_pipeline,
                     output_path=markdown_path,
+                    force_redo=force_redo_ai,
                 )
                 export_slides_json(
                     video_path,

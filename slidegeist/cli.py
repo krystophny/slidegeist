@@ -139,7 +139,8 @@ def handle_process(args: argparse.Namespace) -> None:
             device=args.device,
             image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
             split_slides=getattr(args, 'split', False),
-            retry_failed=getattr(args, 'retry_failed', False)
+            retry_failed=getattr(args, 'retry_failed', False),
+            force_redo_ai=getattr(args, 'force_redo_ai', False)
         )
 
         print("\n" + "=" * 60)
@@ -323,6 +324,11 @@ Examples:
         "--retry-failed",
         action="store_true",
         help="Retry previously failed stages (transcription, OCR, AI descriptions)"
+    )
+    process_parser.add_argument(
+        "--force-redo-ai",
+        action="store_true",
+        help="Regenerate ALL AI descriptions even if they already exist"
     )
 
     # Slides command

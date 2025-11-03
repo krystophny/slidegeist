@@ -484,6 +484,7 @@ def run_ai_descriptions(
     describer: TorchQwen3Describer,
     ocr_pipeline: OcrPipeline | None = None,
     output_path: Path | None = None,
+    force_redo: bool = False,
 ) -> dict[str, str]:
     """Run AI descriptions on all slides with incremental saving.
 
@@ -493,6 +494,7 @@ def run_ai_descriptions(
         describer: AI describer instance.
         ocr_pipeline: OCR pipeline to extract text (optional).
         output_path: Path to slides.md for incremental updates (optional).
+        force_redo: If True, regenerate all AI descriptions even if they exist.
 
     Returns:
         Dictionary mapping slide_id to AI description.
@@ -501,22 +503,29 @@ def run_ai_descriptions(
 
     descriptions: dict[str, str] = {}
 
-    # Load existing descriptions to skip already processed slides
+    # Load existing descriptions to skip already processed slides (unless force_redo)
     existing_data = {}
-    if output_path and output_path.exists():
+    total_slides = len(slide_metadata)
+
+    if output_path and output_path.exists() and not force_redo:
         existing_data = _parse_existing_markdown(output_path)
         # Count how many already have AI descriptions
         existing_count = sum(1 for data in existing_data.values() if data.get("ai_description"))
         if existing_count > 0:
-            logger.info(f"Found {existing_count} existing AI descriptions, will skip those slides")
+            if existing_count == total_slides:
+                logger.info(f"All {total_slides} slides have AI descriptions, will skip generation")
+            else:
+                logger.info(f"Found {existing_count}/{total_slides} existing AI descriptions, will skip those and generate the rest")
+    elif force_redo:
+        logger.info("Force redo enabled: regenerating ALL AI descriptions")
 
     for slide_index, t_start, t_end, image_path in tqdm(
         slide_metadata, desc="Generating AI descriptions", unit="slide"
     ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
 
-        # Skip if already has AI description
-        if slide_id in existing_data and existing_data[slide_id].get("ai_description"):
+        # Skip if already has AI description (unless force_redo)
+        if not force_redo and slide_id in existing_data and existing_data[slide_id].get("ai_description"):
             descriptions[slide_id] = existing_data[slide_id]["ai_description"]
             logger.debug(f"Skipping {slide_id} (already has AI description)")
             continue
