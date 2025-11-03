@@ -10,7 +10,7 @@ psutil==7.0.0
 
 # Optional torch dependencies (exact versions)
 torch==2.9.0
-transformers==4.56.2
+git+https://github.com/huggingface/transformers.git
 torchvision==0.24.0
 accelerate==1.11.0
 autoawq==0.2.9

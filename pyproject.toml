@@ -42,7 +42,7 @@ mlx = [
 ]
 torch = [
     "torch>=2.9.0,<3.0",
-    "transformers>=4.56.2,<4.57",
+    "transformers @ git+https://github.com/huggingface/transformers.git",
     "torchvision>=0.24.0,<1.0",
     "accelerate>=1.11.0,<2.0",
     "autoawq>=0.2.9,<1.0",
