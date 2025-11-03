@@ -138,7 +138,8 @@ def handle_process(args: argparse.Namespace) -> None:
             source_url=source_url,
             device=args.device,
             image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
-            split_slides=getattr(args, 'split', False)
+            split_slides=getattr(args, 'split', False),
+            retry_failed=getattr(args, 'retry_failed', False)
         )
 
         print("\n" + "=" * 60)
@@ -317,6 +318,11 @@ Examples:
         "--split",
         action="store_true",
         help="Create separate markdown files (index.md + slide_NNN.md) instead of single slides.md"
+    )
+    process_parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry previously failed stages (transcription, OCR, AI descriptions)"
     )
 
     # Slides command
