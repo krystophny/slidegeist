@@ -52,33 +52,39 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Describe this slide so another AI can recreate it exactly. Use structured markdown format.
+    return f"""Describe this slide so another AI can recreate it exactly. This slide may contain HANDWRITTEN text, formulas, and figures in addition to printed text.
 
-## TITLE
+Reference context (may contain OCR artifacts):
+{context}
+
+Output exactly 5 numbered sections:
+
+1. TITLE
 [If visible: exact title text. If not visible: infer descriptive title from content (2-8 words)]
 
-## TEXT CONTENT
-[List all visible text verbatim in order of appearance (top to bottom, left to right)]
+2. TEXT CONTENT
+[List ALL visible text verbatim in order (top to bottom, left to right)]
+[Specify if handwritten or printed for each text block]
 [Include: headings, body text, bullet points, labels, annotations]
 [Format: Use markdown bullets for lists, preserve line breaks]
 
-## FORMULAS
+3. FORMULAS
 [Every mathematical equation in LaTeX notation]
+[Specify if handwritten or printed]
 [Format: One equation per line with $...$ for inline or $$...$$ for display]
 [Include: variable definitions, units, equation numbers if present]
 [If no formulas: write "None"]
 
-## VISUAL ELEMENTS
+4. VISUAL ELEMENTS
 [Describe every diagram, plot, graph, or illustration for recreation]
 [Specify: type (flowchart/plot/diagram), spatial layout (top-left/center/etc), components (boxes/arrows/curves), colors, labels]
+[Note if hand-drawn or computer-generated]
 [If no visual elements: write "None"]
 
-## LAYOUT
+5. LAYOUT
 [Overall structure: single-column/two-column/grid]
 [Spatial relationships: what's above/below/beside what]
 [Hierarchy: title size, heading levels, emphasis]
-
-Context: {context}
 
 END"""
 
