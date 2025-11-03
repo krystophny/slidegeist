@@ -120,13 +120,17 @@ class TorchQwen3Describer:
 
     def __init__(
         self,
-        max_new_tokens: int = 2048,
-        temperature: float = 0.3,
+        max_new_tokens: int = 2048,  # Qwen3-VL recommended for detailed analysis
+        temperature: float = 0.7,  # Qwen3-VL recommended for vision tasks
+        top_p: float = 0.8,  # Qwen3-VL recommended
+        top_k: int = 20,  # Qwen3-VL recommended
         device: str = "auto",
     ) -> None:
         self.name = "Qwen3-VL-8B (PyTorch)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
         self.device = device
         self._model = None
         self._processor = None
@@ -175,34 +179,43 @@ class TorchQwen3Describer:
             },
         ]
 
-        # Process inputs
-        text_prompt = self._processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        # Process inputs using official API
+        logger.debug("Processing inputs...")
+        inputs = self._processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt"
         )
-        inputs = self._processor(
-            text=[text_prompt],
-            images=[image],
-            return_tensors="pt",
-            padding=True,
-        )
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        inputs = inputs.to(self._model.device)
 
-        # Generate
+        # Generate with Qwen3-VL recommended parameters
+        logger.info(f"Generating description (max {self.max_new_tokens} tokens, temp={self.temperature})...")
+        import time
+        start_time = time.time()
+
         with self._torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 temperature=self.temperature,
-                do_sample=True if self.temperature > 0 else False,
+                top_p=self.top_p,
+                top_k=self.top_k,
+                do_sample=True,
+                repetition_penalty=1.0,
             )
 
-        # Decode
-        generated_ids = [
-            output_ids[len(input_ids) :]
-            for input_ids, output_ids in zip(inputs["input_ids"], output_ids)
+        elapsed = time.time() - start_time
+        logger.info(f"Generation complete in {elapsed:.1f}s")
+
+        # Decode (trim input prompt from output)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs["input_ids"], output_ids)
         ]
         output_text = self._processor.batch_decode(
-            generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )[0]
 
         return clean_text(output_text)
