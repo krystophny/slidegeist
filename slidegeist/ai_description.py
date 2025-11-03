@@ -52,71 +52,27 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Analyze this presentation slide and extract ALL content in a structured format.
+    return f"""Extract ALL content from this slide for accurate reconstruction.
 
-IMPORTANT: This slide may contain BOTH handwritten and machine-printed text.
+Output sections:
+1. TOPIC (1-3 words)
+2. TITLE (extract or infer)
+3. TEXT_CONTENT (all printed and handwritten text, exact wording)
+4. FORMULAS (LaTeX notation, all equations with units)
+5. VISUAL_ELEMENTS (diagrams, plots, graphs with spatial layout)
+6. TABLES (full structure and contents)
+7. SYMBOLS (special characters, Greek letters, operators)
+8. LAYOUT (spatial arrangement, hierarchy)
 
-Generate a complete description with these sections:
+Context: {context}
 
-1. TOPIC: Main subject (1-3 words, e.g., "Plasma Confinement", "Maxwell Equations")
-
-2. TITLE: Suggested slide title (extract from slide or infer from content)
-
-3. TEXT_CONTENT:
-   - ALL machine-printed text (typed, laser-printed)
-   - ALL handwritten text (pen, marker, chalk)
-   - Preserve EXACT wording, line breaks, and formatting
-   - Note which parts are handwritten vs. printed
-   - Include annotations, labels, and captions
-
-4. FORMULAS:
-   - ALL mathematical/physics expressions in LaTeX notation
-   - Include inline formulas (e.g., \\( E = mc^2 \\)) and display equations
-   - Preserve equation numbering if present
-   - Include units, subscripts, superscripts
-   - Handle Greek letters, vectors, tensors, operators (∇, ∂, ∫, etc.)
-
-5. VISUAL_ELEMENTS:
-   - Diagrams: describe topology, connections, flow
-   - Plots/graphs: axes, labels, curves, data points
-   - Flowcharts: boxes, decision points, arrows
-   - Scientific diagrams: field lines, vectors, coordinate systems
-   - Describe structure precisely for recreation as SVG, TikZ, Manim, or other formats
-   - Include ALL arrows, boxes, circles, annotations with relative positions
-   - Specify colors, line styles, markers if visible
-
-6. TABLES:
-   - Full structure: number of rows, columns, headers
-   - ALL cell contents exactly as shown
-   - Alignment, borders, merged cells
-   - Units in headers if present
-
-7. SYMBOLS:
-   - Special symbols, icons, markers not covered above
-   - Greek letters in text context
-   - Mathematical operators, logic symbols
-   - Physical constants notation
-
-8. LAYOUT:
-   - Spatial arrangement (top-to-bottom, left-to-right, multi-column)
-   - Alignment, spacing, indentation
-   - Visual hierarchy (title, sections, bullet points)
-   - Relative positioning of elements
-
-Context (reference only, may contain OCR errors):
-{context}
-
-OUTPUT REQUIREMENTS:
-- Be EXHAUSTIVE - capture every visible element
-- Use standard notation (LaTeX for math, structured descriptions for visuals)
-- Format for downstream parsing by automated tools
-- Prioritize accuracy over brevity"""
+Be exhaustive. Use LaTeX for math."""
 
 
 class TorchQwen3Describer:
-    """AI slide describer using Qwen3-VL-4B via PyTorch with full CUDA support."""
+    """AI slide describer using Qwen3-VL-8B via PyTorch with 4-bit quantization."""
 
-    MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
+    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 
     def __init__(
         self,
@@ -126,7 +82,7 @@ class TorchQwen3Describer:
         top_k: int = 20,  # Qwen3-VL recommended
         device: str = "auto",
     ) -> None:
-        self.name = "Qwen3-VL-4B (PyTorch FP16)"
+        self.name = "Qwen3-VL-8B (PyTorch 8-bit)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -244,17 +200,18 @@ class TorchQwen3Describer:
         gc.collect()
 
         if self._device == "cuda":
-            # Use FP16 for CUDA (fast and fits in 16GB VRAM: ~10-12GB, 25-35 tokens/sec)
+            # Use 8-bit quantization for CUDA (fits in 16GB VRAM: ~8-10GB)
+            quantization_config = self._BitsAndBytesConfig(load_in_8bit=True)
             self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
                 self.MODEL_ID,
-                torch_dtype=self._torch.float16,
+                quantization_config=quantization_config,
                 device_map="auto",
             )
         else:
             # CPU: load in full precision
             self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
                 self.MODEL_ID,
-                torch_dtype=self._torch.float32,
+                dtype=self._torch.float32,
                 device_map="cpu",
             )
 
