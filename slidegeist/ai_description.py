@@ -152,6 +152,17 @@ class TorchQwen3Describer:
         import time
         start_time = time.time()
 
+        # Use streaming if debug logging is enabled
+        streamer = None
+        if logger.isEnabledFor(logging.DEBUG):
+            from transformers import TextStreamer  # type: ignore[import-untyped]
+            streamer = TextStreamer(
+                self._processor.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+            logger.debug("Streaming generation output:")
+
         with self._torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
@@ -161,10 +172,13 @@ class TorchQwen3Describer:
                 top_k=self.top_k,
                 do_sample=True,
                 repetition_penalty=1.0,
+                streamer=streamer,
             )
 
         elapsed = time.time() - start_time
-        logger.info(f"Generation complete in {elapsed:.1f}s")
+        tokens_generated = len(output_ids[0]) - len(inputs["input_ids"][0])
+        tokens_per_sec = tokens_generated / elapsed if elapsed > 0 else 0
+        logger.info(f"Generation complete in {elapsed:.1f}s ({tokens_generated} tokens, {tokens_per_sec:.1f} tok/s)")
 
         # Decode (trim input prompt from output)
         generated_ids_trimmed = [
@@ -174,6 +188,8 @@ class TorchQwen3Describer:
         output_text = self._processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )[0]
+
+        logger.debug(f"Generated description:\n{output_text}")
 
         return clean_text(output_text)
 
