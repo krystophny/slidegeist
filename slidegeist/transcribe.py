@@ -15,23 +15,6 @@ from slidegeist.constants import (
 logger = logging.getLogger(__name__)
 
 
-def is_cuda_available() -> bool:
-    """Check if CUDA GPU is available.
-
-    Returns:
-        True if CUDA GPU is available and working, False otherwise.
-    """
-    try:
-        import torch  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-
-        return torch.cuda.is_available()
-    except (ImportError, AttributeError, RuntimeError):
-        # ImportError: torch not installed
-        # AttributeError: torch.cuda not available
-        # RuntimeError: CUDA initialization failed
-        return False
-
-
 class Word(TypedDict):
     """A single word with timing information."""
 
@@ -85,14 +68,9 @@ def transcribe_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
-    # Auto-detect best available device
+    # whisper.cpp auto-detects CUDA, device parameter kept for API compatibility
     if device == "auto":
-        if is_cuda_available():
-            device = "cuda"
-            logger.info("CUDA GPU detected - using GPU acceleration")
-        else:
-            device = "cpu"
-            logger.info("Auto-detected device: CPU")
+        logger.info("Device: auto (whisper.cpp will auto-detect CUDA/CPU)")
 
     # Map model names to pywhispercpp format
     model_map = {
@@ -122,20 +100,12 @@ def transcribe_video(
     logger.info(f"Loading Whisper model: {whisper_model} on {device}")
     start_time = time.time()
 
-    # Initialize model with GPU support if CUDA available
-    n_threads = 0  # Auto-detect CPU threads
-    if device == "cuda":
-        model = Model(
-            model=whisper_model,
-            n_threads=n_threads,
-            use_gpu=True,
-        )
-    else:
-        model = Model(
-            model=whisper_model,
-            n_threads=n_threads,
-            use_gpu=False,
-        )
+    # Initialize model (whisper.cpp auto-detects CUDA)
+    # n_threads=0 means auto-detect optimal thread count
+    model = Model(
+        model=whisper_model,
+        n_threads=0,
+    )
 
     logger.info(f"Transcribing: {video_path.name}")
 
