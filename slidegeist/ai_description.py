@@ -222,7 +222,7 @@ class TorchQwen3Describer:
         messages = [{
             "role": "user",
             "content": [
-                {"type": "image", "url": f"file://{image_path.absolute()}"},
+                {"type": "image", "image": str(image_path.absolute())},
                 {"type": "text", "text": combined_text},
             ]
         }]

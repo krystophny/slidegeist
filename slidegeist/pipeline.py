@@ -521,9 +521,13 @@ def process_video(
         except Exception as exc:
             error_msg = f"AI description failed: {exc}\n\nTo fix:\n"
             error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
-            error_msg += "2. For PyTorch CUDA: Install PyTorch with CUDA first\n"
-            error_msg += "3. For PyTorch CPU: pip install torch transformers\n"
+            error_msg += "2. For PyTorch CUDA: pip install torch transformers torchvision\n"
+            error_msg += "3. For PyTorch CPU: pip install torch transformers torchvision\n"
+            logger.error("=" * 60)
+            logger.error("AI DESCRIPTION FAILED")
+            logger.error("=" * 60)
             logger.error(error_msg)
+            logger.error("=" * 60)
             mark_stage_failed(output_dir, "ai_description", error_msg)
 
     elif completed_stages["ai_description"]:
@@ -553,8 +557,10 @@ def process_video(
         logger.info("✓ Transcription available")
     if completed_stages["ocr"] or needs_ocr:
         logger.info("✓ OCR complete")
-    if completed_stages["ai_description"] or needs_ai:
+    if completed_stages["ai_description"]:
         logger.info("✓ AI descriptions generated")
+    elif failed_stages.get("ai_description"):
+        logger.warning("✗ AI descriptions FAILED - check .ai_description_failed for details")
     if results.get("slides_md"):
         logger.info("✓ Updated slides markdown")
     logger.info(f"✓ All outputs in: {output_dir}")
