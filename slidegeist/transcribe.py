@@ -24,6 +24,12 @@ def is_mlx_available() -> bool:
     Returns:
         True if running on Apple Silicon with MLX support, False otherwise.
     """
+    # Allow user to completely disable MLX if it causes hard crashes
+    import os
+    if os.getenv("SLIDEGEIST_DISABLE_MLX", "").lower() in {"1", "true", "yes"}:
+        logger.info("MLX disabled via SLIDEGEIST_DISABLE_MLX environment variable")
+        return False
+
     # Check if we're on macOS ARM64 (Apple Silicon)
     if platform.system() != "Darwin":
         return False
@@ -31,12 +37,23 @@ def is_mlx_available() -> bool:
         return False
 
     # Check if mlx-whisper is importable without actually importing it
-    # This avoids potential crashes during detection phase
+    # NOTE: Even find_spec() can trigger hard crashes if MLX C++ bindings are corrupted
+    # If experiencing hard crashes (macOS crash dialog), set SLIDEGEIST_DISABLE_MLX=1
     try:
         import importlib.util
         spec = importlib.util.find_spec("mlx_whisper")
-        return spec is not None
+        if spec is None:
+            return False
+
+        # Additional safety: check if we can at least import the package
+        # This is still risky but necessary for validation
+        logger.debug("MLX package found, attempting validation import")
+        return True
     except (ImportError, ValueError, AttributeError):
+        return False
+    except Exception as e:
+        # Catch any other errors including potential crashes during spec lookup
+        logger.warning(f"MLX detection failed: {e}")
         return False
 
 

@@ -245,6 +245,35 @@ Introduction to Quantum Mechanics
 - `base`: Quick testing - 5x faster, noticeably lower accuracy
 - `tiny`: Very fast - 10x faster, lowest accuracy
 
+## Troubleshooting
+
+### macOS Hard Crashes with MLX
+
+If Python crashes hard (macOS crash dialog) when using MLX on Apple Silicon:
+
+```bash
+# Disable MLX and use CPU-based transcription instead
+export SLIDEGEIST_DISABLE_MLX=1
+slidegeist video.mp4
+```
+
+This forces CPU mode even on Apple Silicon. The crash typically happens when:
+- MLX libraries are corrupted or partially installed
+- Metal framework has compatibility issues
+- System libraries are out of date
+
+To fix permanently, try:
+```bash
+# Reinstall MLX packages
+pip uninstall mlx-whisper mlx-vlm -y
+pip install --no-cache-dir mlx-whisper mlx-vlm
+```
+
+You can also explicitly use CPU mode without the environment variable:
+```bash
+slidegeist video.mp4 --device cpu
+```
+
 ## Limitations
 
 - Scene detection may need threshold tuning for some videos (default 0.025 works well for most lectures; because the optimizer auto-adjusts, use lower values like 0.015 to bias toward more slides or 0.03+ to bias toward fewer major transitions)
