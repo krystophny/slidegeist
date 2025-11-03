@@ -144,11 +144,14 @@ def export_slides_json(
         logger.info("Creating slides markdown with %d slides", len(slide_metadata))
 
     # Process all slides and collect data
+    from tqdm import tqdm
+
     slide_sections: list[str] = []
     index_lines: list[str] = []
-    total_slides = len(slide_metadata)
 
-    for index, (slide_index, t_start, t_end, image_path) in enumerate(slide_metadata):
+    for slide_index, t_start, t_end, image_path in tqdm(
+        slide_metadata, desc="Processing slides", unit="slide", disable=not ocr_pipeline
+    ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
         image_filename = image_path.name
 
@@ -484,10 +487,13 @@ def run_ai_descriptions(
     Returns:
         Dictionary mapping slide_id to AI description.
     """
-    descriptions: dict[str, str] = {}
-    total_slides = len(slide_metadata)
+    from tqdm import tqdm
 
-    for idx, (slide_index, t_start, t_end, image_path) in enumerate(slide_metadata, start=1):
+    descriptions: dict[str, str] = {}
+
+    for slide_index, t_start, t_end, image_path in tqdm(
+        slide_metadata, desc="Generating AI descriptions", unit="slide"
+    ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
 
         transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
@@ -504,7 +510,6 @@ def run_ai_descriptions(
             description = describer.describe(image_path, transcript_text, ocr_text)
             if description:
                 descriptions[slide_id] = description
-                logger.info(f"AI description {idx}/{total_slides}: {slide_id}")
             else:
                 logger.warning(f"Empty AI description for {slide_id}")
         except Exception as exc:
