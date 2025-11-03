@@ -196,14 +196,6 @@ class TorchQwen3Describer:
             sys.stdout.write("\nGenerating: ")
             sys.stdout.flush()
 
-        # Create stopping criteria to prevent infinite loops
-        stop_strings = ["END", "\n\nEND", "6.", "7.", "8."]  # Stop if these appear
-        stop_token_ids = [self._processor.tokenizer.eos_token_id]
-        for stop_str in stop_strings:
-            tokens = self._processor.tokenizer.encode(stop_str, add_special_tokens=False)
-            if tokens:
-                stop_token_ids.append(tokens[-1])
-
         with self._torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
@@ -212,9 +204,8 @@ class TorchQwen3Describer:
                 top_p=self.top_p,
                 top_k=self.top_k,
                 do_sample=True,
-                repetition_penalty=1.1,  # Higher to prevent repetition loops
+                repetition_penalty=1.05,  # Slightly higher to reduce repetition
                 streamer=streamer,
-                eos_token_id=stop_token_ids,  # Stop at EOS or "END" or section 6/7/8
             )
 
         if streamer is not None:
