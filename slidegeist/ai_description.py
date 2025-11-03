@@ -275,7 +275,7 @@ class TorchQwen3Describer:
 
             self._model = self._qwen3vl_class.from_pretrained(
                 self.MODEL_ID,
-                torch_dtype="auto",
+                dtype=self._torch.float16,  # AWQ works best with float16
                 device_map="auto",
                 max_memory=max_memory
             )
