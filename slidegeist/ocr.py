@@ -353,49 +353,96 @@ class MlxQwenRefiner(BaseRefiner):
 
 
 class MlxQwenDescriber:
-    """Use Qwen3-VL 8B for detailed slide descriptions for AI reconstruction."""
+    """Use Qwen3-VL-8B for detailed slide descriptions for AI reconstruction.
 
-    MODEL_ID = "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+    Supports both MLX (Apple Silicon) and PyTorch (CUDA/CPU) backends.
+    """
+
+    MLX_MODEL_ID = "lmstudio-community/Qwen3-VL-8B-Instruct-MLX-4bit"
+    TORCH_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 
     def __init__(
         self,
-        max_new_tokens: int = 1024,
-        temperature: float = 0.1,
+        max_new_tokens: int = 2048,
+        temperature: float = 0.3,
     ) -> None:
-        self.name = "Qwen2-VL-7B (mlx)"
+        self.name = "Qwen3-VL-8B"
         self.version = None
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 
-        self._load = None
-        self._generate = None
-        self._apply_chat_template = None
+        # Backend-specific attributes
+        self._backend: str = "none"  # "mlx", "torch", or "none"
         self._model = None
         self._processor = None
         self._config = None
         self._available = False
 
-        if platform.system() != "Darwin":
+        # Try MLX first (Apple Silicon)
+        if self._try_init_mlx():
+            self.name = "Qwen3-VL-8B (MLX)"
             return
 
-        try:
-            from mlx_vlm import generate, load  # type: ignore
-            from mlx_vlm.prompt_utils import apply_chat_template  # type: ignore
-        except ImportError:
-            logger.info("mlx-vlm not installed; MLX slide description disabled")
+        # Fall back to PyTorch (CUDA/CPU)
+        if self._try_init_torch():
+            if hasattr(self, "_device") and self._device == "cuda":
+                self.name = "Qwen3-VL-8B (CUDA)"
+            else:
+                self.name = "Qwen3-VL-8B (CPU)"
             return
 
-        self._load = load
-        self._generate = generate
-        self._apply_chat_template = apply_chat_template
-        self._available = True
+        # Neither backend available
+        logger.info("Qwen3-VL not available (neither MLX nor PyTorch)")
+
+    def _try_init_mlx(self) -> bool:
+        """Try to initialize MLX backend (Apple Silicon)."""
+        if platform.system() != "Darwin" or platform.machine() != "arm64":
+            return False
 
         try:
             import mlx_vlm  # type: ignore
-        except ImportError:
-            self.version = None
-        else:
+            from mlx_vlm import generate, load  # type: ignore
+            from mlx_vlm.prompt_utils import apply_chat_template  # type: ignore
+
+            self._load = load
+            self._generate = generate
+            self._apply_chat_template = apply_chat_template
+            self._backend = "mlx"
+            self._available = True
             self.version = getattr(mlx_vlm, "__version__", None)
+            logger.info("MLX-VLM detected for Qwen3-VL descriptions")
+            return True
+        except ImportError:
+            logger.debug("mlx-vlm not installed; MLX slide description disabled")
+            return False
+
+    def _try_init_torch(self) -> bool:
+        """Try to initialize PyTorch backend (CUDA/CPU)."""
+        try:
+            import torch  # type: ignore[import-untyped, import-not-found]
+            from transformers import (  # type: ignore[import-untyped, import-not-found]
+                AutoProcessor,
+                Qwen3VLForConditionalGeneration,
+            )
+
+            self._torch = torch
+            self._qwen3vl_class = Qwen3VLForConditionalGeneration
+            self._autoprocessor_class = AutoProcessor
+            self._backend = "torch"
+            self._available = True
+
+            # Detect device
+            if torch.cuda.is_available():
+                self._device = "cuda"
+                logger.info("PyTorch CUDA detected for Qwen3-VL")
+            else:
+                self._device = "cpu"
+                logger.info("PyTorch CPU backend for Qwen3-VL")
+
+            return True
+        except ImportError:
+            logger.debug("PyTorch or transformers not available for Qwen3-VL")
+            return False
 
     def is_available(self) -> bool:
         return self._available
@@ -421,31 +468,26 @@ class MlxQwenDescriber:
             logger.debug("Qwen description disabled via SLIDEGEIST_DISABLE_QWEN")
             return ""
 
-        self._ensure_loaded()
+        try:
+            if self._backend == "mlx":
+                return self._describe_mlx(image_path, transcript)
+            elif self._backend == "torch":
+                return self._describe_torch(image_path, transcript)
+            else:
+                return ""
+        except Exception as e:
+            logger.warning(f"Qwen3-VL description failed for {image_path}: {e}")
+            return ""
+
+    def _describe_mlx(self, image_path: Path, transcript: str) -> str:
+        """MLX backend implementation."""
+        self._ensure_loaded_mlx()
 
         if self._model is None or self._processor is None:
             return ""
 
-        # Build prompt for detailed slide description
-        system_instruction = (
-            "You are an expert at analyzing academic and professional presentation slides. "
-            "Describe the slide in extreme detail so another AI could recreate it perfectly in LaTeX Beamer. "
-            "Include: all text verbatim, layout structure, font sizes/styles, colors, "
-            "mathematical formulas (in LaTeX), diagrams (describe for TikZ/SVG recreation), "
-            "charts/graphs (describe data and styling), images (describe content and placement), "
-            "bullet points, numbering, alignment, spacing, and any visual elements."
-        )
-
-        context_info = ""
-        if transcript:
-            context_info = f"\n\nTranscript context: {transcript[:500]}"
-
-        user_text = (
-            "Analyze this presentation slide and provide an exhaustive description "
-            "that would allow another AI to recreate it pixel-perfectly in LaTeX Beamer, "
-            "with TikZ/SVG for diagrams and proper formatting for all visual elements."
-            f"{context_info}"
-        )
+        system_instruction = self._get_system_instruction()
+        user_text = self._get_user_text(transcript)
 
         content: list[dict[str, Any]] = [
             {"type": "image", "image": str(image_path)},
@@ -457,45 +499,146 @@ class MlxQwenDescriber:
             {"role": "user", "content": content},
         ]
 
-        try:
-            formatted = self._apply_chat_template(  # type: ignore[misc]
-                self._processor,
-                self._config,
-                messages,
-                add_generation_prompt=True,
-            )
+        formatted = self._apply_chat_template(  # type: ignore[misc]
+            self._processor,
+            self._config,
+            messages,
+            add_generation_prompt=True,
+        )
 
-            output = self._generate(  # type: ignore[misc]
-                self._model,
-                self._processor,
-                formatted,
-                images=[str(image_path)],
-                max_tokens=self.max_new_tokens,
-                temperature=self.temperature,
-                verbose=False,
-            )
+        output = self._generate(  # type: ignore[misc]
+            self._model,
+            self._processor,
+            formatted,
+            images=[str(image_path)],
+            max_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            verbose=False,
+        )
 
-            if isinstance(output, str):
-                return output.strip()
-            elif isinstance(output, dict):
-                return str(output.get("choices", [{}])[0].get("text", "")).strip()
-            else:
-                return str(output).strip()
+        if isinstance(output, str):
+            return output.strip()
+        elif isinstance(output, dict):
+            return str(output.get("choices", [{}])[0].get("text", "")).strip()
+        else:
+            return str(output).strip()
 
-        except Exception as e:
-            logger.warning(f"Qwen description failed for {image_path}: {e}")
+    def _describe_torch(self, image_path: Path, transcript: str) -> str:
+        """PyTorch backend implementation."""
+        self._ensure_loaded_torch()
+
+        if self._model is None or self._processor is None:
             return ""
 
-    def _ensure_loaded(self) -> None:
+        system_instruction = self._get_system_instruction()
+        user_text = self._get_user_text(transcript)
+
+        # Qwen3-VL doesn't use system role in transformers, combine into user message
+        combined_text = f"{system_instruction}\n\n{user_text}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": f"file://{image_path.absolute()}"},
+                    {"type": "text", "text": combined_text}
+                ]
+            }
+        ]
+
+        inputs = self._processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        inputs.pop("token_type_ids", None)
+
+        # Move to device
+        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+        generated_ids = self._model.generate(
+            **inputs,
+            max_new_tokens=self.max_new_tokens,
+            do_sample=True,
+            temperature=self.temperature,
+        )
+
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
+        ]
+        output_text = self._processor.batch_decode(
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False
+        )
+
+        return output_text[0].strip() if output_text else ""
+
+    def _get_system_instruction(self) -> str:
+        """Get system instruction for slide description."""
+        return (
+            "You are an expert at analyzing academic and professional presentation slides. "
+            "Describe the slide in extreme detail so another AI could recreate it perfectly in LaTeX Beamer. "
+            "Include: all text verbatim, layout structure, font sizes/styles, colors, "
+            "mathematical formulas (in LaTeX), diagrams (describe for TikZ/SVG recreation), "
+            "charts/graphs (describe data and styling), images (describe content and placement), "
+            "bullet points, numbering, alignment, spacing, and any visual elements."
+        )
+
+    def _get_user_text(self, transcript: str) -> str:
+        """Get user prompt text."""
+        context_info = ""
+        if transcript:
+            context_info = f"\n\nTranscript context: {transcript[:500]}"
+
+        return (
+            "Analyze this presentation slide and provide an exhaustive description "
+            "that would allow another AI to recreate it pixel-perfectly in LaTeX Beamer, "
+            "with TikZ/SVG for diagrams and proper formatting for all visual elements."
+            f"{context_info}"
+        )
+
+    def _ensure_loaded_mlx(self) -> None:
+        """Ensure MLX model is loaded."""
         if self._model is not None:
             return
 
         if self._load is None:
             raise RuntimeError("mlx-vlm load function unavailable")
 
-        logger.info(f"Loading {self.MODEL_ID} for slide description (this may take a moment)...")
-        self._model, self._processor = self._load(self.MODEL_ID)
+        logger.info(f"Loading {self.MLX_MODEL_ID} for slide description (this may take a moment)...")
+        self._model, self._processor = self._load(self.MLX_MODEL_ID)
         self._config = getattr(self._model, "config", None)
+
+    def _ensure_loaded_torch(self) -> None:
+        """Ensure PyTorch model is loaded."""
+        if self._model is not None:
+            return
+
+        logger.info(f"Loading {self.TORCH_MODEL_ID} for slide description (this may take a moment)...")
+
+        # Determine dtype and device_map
+        if self._device == "cuda":
+            dtype = self._torch.float16
+            device_map = "auto"
+        else:
+            dtype = self._torch.float32
+            device_map = None
+
+        self._model = self._qwen3vl_class.from_pretrained(
+            self.TORCH_MODEL_ID,
+            torch_dtype=dtype,
+            device_map=device_map,
+        )
+
+        if device_map is None:
+            self._model = self._model.to(self._device)
+
+        self._processor = self._autoprocessor_class.from_pretrained(self.TORCH_MODEL_ID)
 
 
 def _build_prompt_messages(
