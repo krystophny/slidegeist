@@ -162,17 +162,6 @@ class TorchQwen3Describer:
         import time
         start_time = time.time()
 
-        # Use streaming if debug logging is enabled
-        streamer = None
-        if logger.isEnabledFor(logging.DEBUG):
-            from transformers import TextStreamer  # type: ignore[import-untyped]
-            streamer = TextStreamer(
-                self._processor.tokenizer,
-                skip_prompt=True,
-                skip_special_tokens=True
-            )
-            logger.debug("Streaming generation output:")
-
         with self._torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
@@ -182,7 +171,6 @@ class TorchQwen3Describer:
                 top_k=self.top_k,
                 do_sample=True,
                 repetition_penalty=1.0,
-                streamer=streamer,
             )
 
         elapsed = time.time() - start_time
