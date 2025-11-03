@@ -87,7 +87,7 @@ def test_export_slides_manifest_and_payloads(tmp_path: Path) -> None:
 
     # Check OCR content (if Tesseract available, should have content)
     if ocr_pipeline._primary is not None and ocr_pipeline._primary.is_available:
-        assert "## Slide Content" in slide1_content
+        assert "## OCR Text" in slide1_content
         # Should extract some text from the image
         assert "QUANTUM" in slide1_content or "quantum" in slide1_content.lower()
 
@@ -127,7 +127,7 @@ def test_export_slides_handles_empty_transcript(tmp_path: Path) -> None:
 
     # Should still have OCR content if Tesseract available
     if ocr_pipeline._primary is not None and ocr_pipeline._primary.is_available:
-        assert "## Slide Content" in content
+        assert "## OCR Text" in content
 
 
 def test_export_slides_empty_metadata(tmp_path: Path) -> None:

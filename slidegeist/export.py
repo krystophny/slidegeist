@@ -126,10 +126,10 @@ def export_slides_json(
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # OCR disabled by default - can be enabled by passing ocr_pipeline
+    # Build default OCR pipeline if none provided
     if ocr_pipeline is None:
-        from slidegeist.ocr import NoOpPipeline
-        ocr_pipeline = NoOpPipeline()  # type: ignore[assignment]
+        from slidegeist.ocr import build_default_ocr_pipeline
+        ocr_pipeline = build_default_ocr_pipeline()
 
     # Read existing markdown to preserve/merge content
     existing_data = _parse_existing_markdown(output_path)
@@ -176,14 +176,17 @@ def export_slides_json(
                 )
                 ocr_text = ocr_payload.get("final_text", "").strip()
                 visual_elements = ocr_payload.get("visual_elements", [])
+                ai_description = ocr_payload.get("ai_description", "").strip()
             except Exception as exc:
                 logger.warning("OCR failed for %s: %s", image_path, exc)
                 ocr_text = existing_slide.get("ocr", "")
                 visual_elements = []
+                ai_description = existing_slide.get("ai_description", "")
         else:
             # No OCR available: keep existing or empty
             ocr_text = existing_slide.get("ocr", "")
             visual_elements = []
+            ai_description = existing_slide.get("ai_description", "")
 
         time_str = f"{_format_timestamp(t_start)}-{_format_timestamp(t_end)}"
 
@@ -198,6 +201,7 @@ def export_slides_json(
                 transcript_text=transcript_text,
                 ocr_text=ocr_text,
                 visual_elements=visual_elements,
+                ai_description=ai_description,
             )
             per_slide_path = output_dir / f"{slide_id}.md"
             per_slide_path.write_text(markdown_content, encoding="utf-8")
@@ -217,6 +221,7 @@ def export_slides_json(
                 transcript_text=transcript_text,
                 ocr_text=ocr_text,
                 visual_elements=visual_elements,
+                ai_description=ai_description,
             )
             slide_sections.append(section)
 
@@ -318,6 +323,7 @@ def _build_slide_section(
     transcript_text: str,
     ocr_text: str,
     visual_elements: list[str],
+    ai_description: str = "",
 ) -> str:
     """Build Markdown section for a slide in combined mode."""
     slide_id = f"slide_{slide_index:03d}"
@@ -339,15 +345,28 @@ def _build_slide_section(
             "",
         ])
 
-    if ocr_text or visual_elements:
-        lines.append("### Slide Content")
-        lines.append("")
-        if ocr_text:
-            lines.extend([ocr_text, ""])
-        if visual_elements:
-            elements_str = ", ".join(visual_elements)
-            lines.append(f"*Visual Elements:* {elements_str}")
-            lines.append("")
+    if ocr_text:
+        lines.extend([
+            "### OCR Text",
+            "",
+            ocr_text,
+            "",
+        ])
+
+    if visual_elements:
+        elements_str = ", ".join(visual_elements)
+        lines.extend([
+            f"**Visual Elements:** {elements_str}",
+            "",
+        ])
+
+    if ai_description:
+        lines.extend([
+            "### AI Description (for reconstruction)",
+            "",
+            ai_description,
+            "",
+        ])
 
     lines.append("---")
     lines.append("")
@@ -363,6 +382,7 @@ def _build_slide_markdown(
     transcript_text: str,
     ocr_text: str,
     visual_elements: list[str],
+    ai_description: str = "",
 ) -> str:
     """Build Markdown content for a single slide in split mode."""
     lines = [
@@ -388,17 +408,28 @@ def _build_slide_markdown(
             "",
         ])
 
-    if ocr_text or visual_elements:
+    if ocr_text:
         lines.extend([
-            "## Slide Content",
+            "## OCR Text",
+            "",
+            ocr_text,
             "",
         ])
-        if ocr_text:
-            lines.extend([ocr_text, ""])
-        if visual_elements:
-            elements_str = ", ".join(visual_elements)
-            lines.append(f"**Visual Elements:** {elements_str}")
-            lines.append("")
+
+    if visual_elements:
+        elements_str = ", ".join(visual_elements)
+        lines.extend([
+            f"**Visual Elements:** {elements_str}",
+            "",
+        ])
+
+    if ai_description:
+        lines.extend([
+            "## AI Description (for reconstruction)",
+            "",
+            ai_description,
+            "",
+        ])
 
     return "\n".join(lines)
 

@@ -77,9 +77,11 @@ class OcrPipeline:
         self,
         primary_extractor: TesseractExtractor | None = None,
         refiner: BaseRefiner | None = None,
+        describer: MlxQwenDescriber | None = None,
     ) -> None:
         self._primary = primary_extractor
         self._refiner = refiner
+        self._describer = describer
 
     def process(
         self,
@@ -93,12 +95,15 @@ class OcrPipeline:
                 "primary_version": None,
                 "refiner": None,
                 "refiner_version": None,
+                "describer": None,
+                "describer_version": None,
             },
             "raw_text": "",
             "final_text": "",
             "blocks": [],
             "visual_elements": [],
             "model_response": None,
+            "ai_description": "",
         }
 
         if self._primary is not None and self._primary.is_available:
@@ -137,6 +142,17 @@ class OcrPipeline:
 
         if not raw_payload["final_text"]:
             raw_payload["final_text"] = raw_payload["raw_text"]
+
+        # AI description for slide reconstruction
+        if self._describer is not None and self._describer.is_available():
+            try:
+                description = self._describer.describe(image_path, transcript_full_text)
+                if description:
+                    raw_payload["ai_description"] = description
+                    raw_payload["engine"]["describer"] = self._describer.name
+                    raw_payload["engine"]["describer_version"] = self._describer.version
+            except Exception as exc:
+                logger.warning("AI description failed for %s: %s", image_path, exc)
 
         return raw_payload
 
@@ -336,6 +352,152 @@ class MlxQwenRefiner(BaseRefiner):
         self._config = getattr(self._model, "config", None)
 
 
+class MlxQwenDescriber:
+    """Use Qwen3-VL 8B for detailed slide descriptions for AI reconstruction."""
+
+    MODEL_ID = "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+
+    def __init__(
+        self,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.1,
+    ) -> None:
+        self.name = "Qwen2-VL-7B (mlx)"
+        self.version = None
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+
+        self._load = None
+        self._generate = None
+        self._apply_chat_template = None
+        self._model = None
+        self._processor = None
+        self._config = None
+        self._available = False
+
+        if platform.system() != "Darwin":
+            return
+
+        try:
+            from mlx_vlm import generate, load  # type: ignore
+            from mlx_vlm.prompt_utils import apply_chat_template  # type: ignore
+        except ImportError:
+            logger.info("mlx-vlm not installed; MLX slide description disabled")
+            return
+
+        self._load = load
+        self._generate = generate
+        self._apply_chat_template = apply_chat_template
+        self._available = True
+
+        try:
+            import mlx_vlm  # type: ignore
+        except ImportError:
+            self.version = None
+        else:
+            self.version = getattr(mlx_vlm, "__version__", None)
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def describe(
+        self,
+        image_path: Path,
+        transcript: str,
+    ) -> str:
+        """Generate detailed slide description for AI reconstruction.
+
+        Args:
+            image_path: Path to slide image.
+            transcript: Transcript text for context.
+
+        Returns:
+            Detailed description string, or empty string if unavailable/failed.
+        """
+        if not self._available:
+            return ""
+
+        if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() in {"1", "true", "yes"}:
+            logger.debug("Qwen description disabled via SLIDEGEIST_DISABLE_QWEN")
+            return ""
+
+        self._ensure_loaded()
+
+        if self._model is None or self._processor is None:
+            return ""
+
+        # Build prompt for detailed slide description
+        system_instruction = (
+            "You are an expert at analyzing academic and professional presentation slides. "
+            "Describe the slide in extreme detail so another AI could recreate it perfectly in LaTeX Beamer. "
+            "Include: all text verbatim, layout structure, font sizes/styles, colors, "
+            "mathematical formulas (in LaTeX), diagrams (describe for TikZ/SVG recreation), "
+            "charts/graphs (describe data and styling), images (describe content and placement), "
+            "bullet points, numbering, alignment, spacing, and any visual elements."
+        )
+
+        context_info = ""
+        if transcript:
+            context_info = f"\n\nTranscript context: {transcript[:500]}"
+
+        user_text = (
+            "Analyze this presentation slide and provide an exhaustive description "
+            "that would allow another AI to recreate it pixel-perfectly in LaTeX Beamer, "
+            "with TikZ/SVG for diagrams and proper formatting for all visual elements."
+            f"{context_info}"
+        )
+
+        content: list[dict[str, Any]] = [
+            {"type": "image", "image": str(image_path)},
+            {"type": "text", "text": user_text},
+        ]
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
+            {"role": "user", "content": content},
+        ]
+
+        try:
+            formatted = self._apply_chat_template(  # type: ignore[misc]
+                self._processor,
+                self._config,
+                messages,
+                add_generation_prompt=True,
+            )
+
+            output = self._generate(  # type: ignore[misc]
+                self._model,
+                self._processor,
+                formatted,
+                images=[str(image_path)],
+                max_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+                verbose=False,
+            )
+
+            if isinstance(output, str):
+                return output.strip()
+            elif isinstance(output, dict):
+                return str(output.get("choices", [{}])[0].get("text", "")).strip()
+            else:
+                return str(output).strip()
+
+        except Exception as e:
+            logger.warning(f"Qwen description failed for {image_path}: {e}")
+            return ""
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None:
+            return
+
+        if self._load is None:
+            raise RuntimeError("mlx-vlm load function unavailable")
+
+        logger.info(f"Loading {self.MODEL_ID} for slide description (this may take a moment)...")
+        self._model, self._processor = self._load(self.MODEL_ID)
+        self._config = getattr(self._model, "config", None)
+
+
 def _build_prompt_messages(
     raw_text: str,
     transcript: str,
@@ -428,14 +590,19 @@ def build_default_ocr_pipeline() -> OcrPipeline:
 
     primary = TesseractExtractor()
     refiner: BaseRefiner | None = None
+    describer: MlxQwenDescriber | None = None
 
     if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() not in {"1", "true", "yes"}:
         if platform.system() == "Darwin":
-            candidate = MlxQwenRefiner()
-            if candidate.is_available():
-                refiner = candidate
+            candidate_refiner = MlxQwenRefiner()
+            if candidate_refiner.is_available():
+                refiner = candidate_refiner
+
+            candidate_describer = MlxQwenDescriber()
+            if candidate_describer.is_available():
+                describer = candidate_describer
 
     if not primary.is_available:
         primary = None  # type: ignore[assignment]
 
-    return OcrPipeline(primary_extractor=primary, refiner=refiner)
+    return OcrPipeline(primary_extractor=primary, refiner=refiner, describer=describer)
