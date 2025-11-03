@@ -204,7 +204,7 @@ class MlxQwen3Describer:
 class TorchQwen3Describer:
     """AI slide describer using Qwen3-VL via PyTorch (CUDA/CPU)."""
 
-    MODEL_ID = "QuantTrio/Qwen3-VL-30B-A3B-Instruct-AWQ"
+    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 
     def __init__(self, max_new_tokens: int = 2048, temperature: float = 0.3) -> None:
         self.max_new_tokens = max_new_tokens
@@ -227,11 +227,11 @@ class TorchQwen3Describer:
 
             if torch.cuda.is_available():
                 self._device = "cuda"
-                self.name = "Qwen3-VL-30B-A3B-AWQ (CUDA+CPU)"
+                self.name = "Qwen3-VL-8B (CUDA)"
                 logger.info("PyTorch CUDA available for Qwen3-VL")
             else:
                 self._device = "cpu"
-                self.name = "Qwen3-VL-30B-A3B-AWQ (CPU)"
+                self.name = "Qwen3-VL-8B (CPU)"
                 logger.info("PyTorch CPU available for Qwen3-VL")
 
             self._available = True
@@ -295,13 +295,13 @@ class TorchQwen3Describer:
         logger.info(f"Loading {self.MODEL_ID}...")
 
         if self._device == "cuda":
-            # AWQ quantized model - must fit entirely on GPU (no CPU offload)
-            logger.info("Loading AWQ model on GPU (no CPU offload)")
+            # Load model on GPU with automatic device mapping
+            logger.info("Loading model on GPU")
 
             self._model = self._qwen3vl_class.from_pretrained(
                 self.MODEL_ID,
-                dtype=self._torch.float16,  # AWQ works best with float16
-                device_map="cuda:0",  # Force GPU-only
+                torch_dtype=self._torch.float16,
+                device_map="auto",
                 trust_remote_code=True
             )
         else:
