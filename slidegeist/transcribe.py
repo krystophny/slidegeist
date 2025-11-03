@@ -30,12 +30,13 @@ def is_mlx_available() -> bool:
     if platform.machine() != "arm64":
         return False
 
-    # Try importing mlx-whisper
+    # Check if mlx-whisper is importable without actually importing it
+    # This avoids potential crashes during detection phase
     try:
-        import mlx_whisper  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-
-        return True
-    except ImportError:
+        import importlib.util
+        spec = importlib.util.find_spec("mlx_whisper")
+        return spec is not None
+    except (ImportError, ValueError, AttributeError):
         return False
 
 
@@ -49,7 +50,10 @@ def is_cuda_available() -> bool:
         import torch  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
         return torch.cuda.is_available()
-    except ImportError:
+    except (ImportError, AttributeError, RuntimeError):
+        # ImportError: torch not installed
+        # AttributeError: torch.cuda not available
+        # RuntimeError: CUDA initialization failed
         return False
 
 
@@ -129,11 +133,14 @@ def transcribe_video(
     # Use MLX-optimized transcription if available
     if use_mlx:
         try:
-            # Suppress MLX verbose debug output
-            logging.getLogger("mlx").setLevel(logging.WARNING)
-            logging.getLogger("mlx_whisper").setLevel(logging.WARNING)
+            import mlx_whisper  # type: ignore[import-untyped, import-not-found]
 
-            import mlx_whisper  # type: ignore[import-untyped]
+            # Suppress MLX verbose debug output (only after successful import)
+            try:
+                logging.getLogger("mlx").setLevel(logging.WARNING)
+                logging.getLogger("mlx_whisper").setLevel(logging.WARNING)
+            except Exception:
+                pass  # Ignore logger configuration errors
 
             # Map faster-whisper model names to MLX model names
             mlx_model_map = {
@@ -171,8 +178,15 @@ def transcribe_video(
                 )
             logger.info(f"MLX transcription complete: {len(mlx_segments)} segments")
             return {"language": result.get("language", "unknown"), "segments": mlx_segments}
+        except ImportError as e:
+            logger.warning(f"MLX import failed: {e}, falling back to faster-whisper")
+            use_mlx = False
+        except (KeyError, AttributeError, TypeError) as e:
+            logger.warning(f"MLX data format error: {e}, falling back to faster-whisper")
+            use_mlx = False
         except Exception as e:
-            logger.warning(f"MLX transcription failed ({e}), falling back to faster-whisper")
+            logger.error(f"MLX transcription crashed: {e}, falling back to faster-whisper")
+            logger.debug("Full traceback:", exc_info=True)
             use_mlx = False
 
     # Adjust compute type based on device
