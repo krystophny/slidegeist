@@ -170,7 +170,7 @@ class MlxQwen3Describer:
 class TorchQwen3Describer:
     """AI slide describer using Qwen3-VL via PyTorch (CUDA/CPU)."""
 
-    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+    MODEL_ID = "QuantTrio/Qwen3-VL-30B-A3B-Instruct-AWQ"
 
     def __init__(self, max_new_tokens: int = 2048, temperature: float = 0.3) -> None:
         self.max_new_tokens = max_new_tokens
@@ -184,20 +184,20 @@ class TorchQwen3Describer:
             import torch  # type: ignore[import-untyped]
             from transformers import (  # type: ignore[import-untyped,import-not-found]
                 AutoProcessor,
-                Qwen3VLForConditionalGeneration,
+                Qwen3VLMoeForConditionalGeneration,
             )
 
             self._torch = torch
-            self._qwen3vl_class = Qwen3VLForConditionalGeneration
+            self._qwen3vl_class = Qwen3VLMoeForConditionalGeneration
             self._autoprocessor_class = AutoProcessor
 
             if torch.cuda.is_available():
                 self._device = "cuda"
-                self.name = "Qwen3-VL-8B (CUDA)"
+                self.name = "Qwen3-VL-30B-A3B-AWQ (CUDA+CPU)"
                 logger.info("PyTorch CUDA available for Qwen3-VL")
             else:
                 self._device = "cpu"
-                self.name = "Qwen3-VL-8B (CPU)"
+                self.name = "Qwen3-VL-30B-A3B-AWQ (CPU)"
                 logger.info("PyTorch CPU available for Qwen3-VL")
 
             self._available = True
@@ -261,18 +261,33 @@ class TorchQwen3Describer:
         logger.info(f"Loading {self.MODEL_ID}...")
 
         if self._device == "cuda":
-            dtype = self._torch.float16
-            device_map = "auto"
+            # AWQ quantized model with GPU + CPU offloading
+            # Allocate 14GB to GPU, rest to CPU (model is ~17GB total)
+            import psutil
+            cpu_memory_gb = int(psutil.virtual_memory().available / (1024**3))
+
+            max_memory = {
+                0: "14GiB",  # Leave 2GB for other processes and activations
+                "cpu": f"{min(cpu_memory_gb - 8, 32)}GiB"  # Reserve 8GB for system
+            }
+
+            logger.info(f"Loading with GPU+CPU offload: GPU=14GB, CPU={max_memory['cpu']}")
+
+            self._model = self._qwen3vl_class.from_pretrained(
+                self.MODEL_ID,
+                torch_dtype="auto",
+                device_map="auto",
+                max_memory=max_memory
+            )
         else:
-            dtype = self._torch.float32
-            device_map = None
-
-        self._model = self._qwen3vl_class.from_pretrained(
-            self.MODEL_ID, torch_dtype=dtype, device_map=device_map
-        )
-
-        if device_map is None and self._model is not None:
-            self._model = self._model.to(self._device)
+            # CPU only
+            logger.info("Loading on CPU (this will be slow)")
+            self._model = self._qwen3vl_class.from_pretrained(
+                self.MODEL_ID,
+                torch_dtype=self._torch.float32
+            )
+            if self._model is not None:
+                self._model = self._model.to(self._device)
 
         self._processor = self._autoprocessor_class.from_pretrained(self.MODEL_ID)
 
