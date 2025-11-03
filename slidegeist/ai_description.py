@@ -188,6 +188,7 @@ class TorchQwen3Describer:
             return_dict=True,
             return_tensors="pt"
         )
+        logger.debug(f"inputs type: {type(inputs)}, keys: {inputs.keys() if isinstance(inputs, dict) else 'not a dict'}")
         inputs = inputs.to(self._model.device)
 
         # Generate with Qwen3-VL recommended parameters
