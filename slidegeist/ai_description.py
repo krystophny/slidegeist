@@ -76,7 +76,7 @@ class TorchQwen3Describer:
 
     def __init__(
         self,
-        max_new_tokens: int = 1024,  # Balanced: enough detail but faster generation
+        max_new_tokens: int = 2048,  # Enough for complete descriptions with formulas/diagrams
         temperature: float = 0.7,  # Qwen3-VL recommended for vision tasks
         top_p: float = 0.8,  # Qwen3-VL recommended
         top_k: int = 20,  # Qwen3-VL recommended
