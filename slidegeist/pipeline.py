@@ -617,3 +617,119 @@ def process_slides_only(
         skip_transcription=True,
     )
     return result
+
+
+def process_pdf(
+    pdf_path: Path,
+    output_dir: Path,
+    image_format: str = DEFAULT_IMAGE_FORMAT,
+    source_url: str | None = None,
+    force_redo_ai: bool = False,
+) -> dict[str, Path | list[Path]]:
+    """Process PDF slides (extract images, OCR, AI descriptions).
+
+    Args:
+        pdf_path: Path to the PDF file.
+        output_dir: Directory where outputs will be saved.
+        image_format: Output image format (jpg or png).
+        source_url: Optional source URL for the PDF.
+        force_redo_ai: If True, regenerate all AI descriptions.
+
+    Returns:
+        Dictionary containing output paths and lists.
+
+    Raises:
+        ImportError: If PyMuPDF is not installed.
+        FileNotFoundError: If PDF file does not exist.
+    """
+    from slidegeist.ai_description import build_ai_describer
+    from slidegeist.export import export_slides_json, run_ai_descriptions
+    from slidegeist.ocr import build_default_ocr_pipeline
+    from slidegeist.pdf import extract_pdf_pages
+
+    logger.info("=" * 60)
+    logger.info(f"PROCESSING PDF: {pdf_path.name}")
+    logger.info("=" * 60)
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results: dict[str, Path | list[Path]] = {"output_dir": output_dir}
+
+    # STEP 1: Extract PDF pages as images with embedded text
+    logger.info("=" * 60)
+    logger.info("STEP 1: PDF Page Extraction")
+    logger.info("=" * 60)
+
+    pdf_pages = extract_pdf_pages(pdf_path, output_dir, image_format)
+    slide_images = [img_path for _, img_path, _ in pdf_pages]
+    pdf_texts = {img_path.stem: text for _, img_path, text in pdf_pages}
+
+    results["slides"] = slide_images
+    logger.info(f"Extracted {len(slide_images)} pages from PDF")
+
+    # Build slide_metadata without timestamps (PDFs have no time)
+    slide_metadata = [(i + 1, 0.0, 0.0, img_path) for i, (_, img_path, _) in enumerate(pdf_pages)]
+
+    # STEP 2: OCR
+    logger.info("=" * 60)
+    logger.info("STEP 2: OCR Text Extraction")
+    logger.info("=" * 60)
+
+    ocr_pipeline = build_default_ocr_pipeline()
+    if ocr_pipeline and ocr_pipeline._primary and ocr_pipeline._primary.is_available:
+        logger.info("OCR pipeline available")
+    else:
+        logger.warning("OCR not available - install tesseract")
+
+    # STEP 3: AI Descriptions
+    logger.info("=" * 60)
+    logger.info("STEP 3: AI Slide Descriptions")
+    logger.info("=" * 60)
+
+    describer = build_ai_describer()
+    ai_descriptions = {}
+
+    if describer:
+        logger.info(f"Using {describer.name} for AI descriptions")
+        markdown_path = output_dir / "slides.md"
+
+        ai_descriptions = run_ai_descriptions(
+            slide_metadata,
+            [],  # No transcript for PDFs
+            describer,
+            ocr_pipeline,
+            output_path=markdown_path,
+            force_redo=force_redo_ai,
+        )
+
+    # STEP 4: Export
+    logger.info("=" * 60)
+    logger.info("STEP 4: Generating Markdown")
+    logger.info("=" * 60)
+
+    markdown_path = output_dir / "slides.md"
+    export_slides_json(
+        pdf_path,
+        slide_metadata,
+        [],  # No transcript segments
+        markdown_path,
+        model="",  # No transcription model
+        ocr_pipeline=ocr_pipeline,
+        source_url=source_url,
+        split_slides=False,
+        ai_descriptions=ai_descriptions,
+        pdf_texts=pdf_texts,  # Pass PDF embedded text
+    )
+
+    results["slides_md"] = markdown_path
+
+    logger.info("=" * 60)
+    logger.info("PDF PROCESSING COMPLETE")
+    logger.info("=" * 60)
+    logger.info(f"✓ Extracted {len(slide_images)} pages")
+    logger.info(f"✓ Generated slides markdown")
+    logger.info(f"✓ All outputs in: {output_dir}")
+
+    return results

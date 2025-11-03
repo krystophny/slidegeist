@@ -17,7 +17,8 @@ from slidegeist.constants import (
 )
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
 from slidegeist.ffmpeg import check_ffmpeg_available
-from slidegeist.pipeline import process_slides_only, process_video
+from slidegeist.pdf import is_pdf_file
+from slidegeist.pipeline import process_pdf, process_slides_only, process_video
 
 logger = logging.getLogger(__name__)
 
@@ -107,41 +108,57 @@ def handle_process(args: argparse.Namespace) -> None:
     """Handle 'slidegeist process' command."""
     try:
         display_legal_notice()
-        check_prerequisites()
-        validate_scene_threshold(args.scene_threshold)
 
         # Determine output directory early (before download)
         output_dir = args.out
         if output_dir == Path(DEFAULT_OUTPUT_DIR):
             # Need to determine from input
             if is_url(args.input):
-                # For URLs, get video filename before downloading
+                # For URLs, get video/PDF filename before downloading
                 video_filename = get_video_filename(args.input, getattr(args, 'cookies_from_browser', None))
                 output_dir = Path.cwd() / video_filename
             else:
-                # For local files, use video filename immediately
+                # For local files, use filename immediately
                 output_dir = Path.cwd() / Path(args.input).stem
 
-        video_path = resolve_video_path(
-            args.input, output_dir, getattr(args, 'cookies_from_browser', None)
-        )
+        # Check if input is a PDF
+        if not is_url(args.input) and is_pdf_file(args.input):
+            logger.info("Detected PDF input - will extract pages and run OCR + AI descriptions")
+            pdf_path = Path(args.input)
+            source_url = None
 
-        source_url = args.input if args.input.startswith(('http://', 'https://')) else None
+            result = process_pdf(
+                pdf_path=pdf_path,
+                output_dir=output_dir,
+                image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
+                source_url=source_url,
+                force_redo_ai=getattr(args, 'force_redo_ai', False)
+            )
+        else:
+            # Video processing
+            check_prerequisites()
+            validate_scene_threshold(args.scene_threshold)
 
-        result = process_video(
-            video_path=video_path,
-            output_dir=output_dir,
-            scene_threshold=args.scene_threshold,
-            min_scene_len=args.min_scene_len,
-            start_offset=args.start_offset,
-            model=args.model,
-            source_url=source_url,
-            device=args.device,
-            image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
-            split_slides=getattr(args, 'split', False),
-            retry_failed=getattr(args, 'retry_failed', False),
-            force_redo_ai=getattr(args, 'force_redo_ai', False)
-        )
+            video_path = resolve_video_path(
+                args.input, output_dir, getattr(args, 'cookies_from_browser', None)
+            )
+
+            source_url = args.input if args.input.startswith(('http://', 'https://')) else None
+
+            result = process_video(
+                video_path=video_path,
+                output_dir=output_dir,
+                scene_threshold=args.scene_threshold,
+                min_scene_len=args.min_scene_len,
+                start_offset=args.start_offset,
+                model=args.model,
+                source_url=source_url,
+                device=args.device,
+                image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
+                split_slides=getattr(args, 'split', False),
+                retry_failed=getattr(args, 'retry_failed', False),
+                force_redo_ai=getattr(args, 'force_redo_ai', False)
+            )
 
         print("\n" + "=" * 60)
         print("✓ Processing complete!")
@@ -252,7 +269,7 @@ Examples:
     common_parent.add_argument(
         "input",
         type=str,
-        help="Input video file path or URL (YouTube, Mediasite, etc.)"
+        help="Input video/PDF file path or URL (YouTube, Mediasite, etc.)"
     )
     common_parent.add_argument(
         "--out",

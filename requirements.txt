@@ -6,6 +6,7 @@ pytesseract==0.3.13
 Pillow==11.3.0
 tqdm==4.67.1
 psutil==7.0.0
+pymupdf==1.24.14
 
 # Whisper transcription (PyTorch backend, works with any CUDA version)
 openai-whisper==20250625

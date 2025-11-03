@@ -114,6 +114,7 @@ def export_slides_json(
     source_url: str | None = None,
     split_slides: bool = False,
     ai_descriptions: dict[str, str] | None = None,
+    pdf_texts: dict[str, str] | None = None,
 ) -> None:
     """Export slides as Markdown file(s).
 
@@ -203,6 +204,9 @@ def export_slides_json(
         else:
             ai_description = existing_slide.get("ai_description", "")
 
+        # Get PDF embedded text if available
+        pdf_text = pdf_texts.get(slide_id, "") if pdf_texts else ""
+
         time_str = f"{_format_timestamp(t_start)}-{_format_timestamp(t_end)}"
 
         if split_slides:
@@ -217,6 +221,7 @@ def export_slides_json(
                 ocr_text=ocr_text,
                 visual_elements=visual_elements,
                 ai_description=ai_description,
+                pdf_text=pdf_text,
             )
             per_slide_path = output_dir / f"{slide_id}.md"
             per_slide_path.write_text(markdown_content, encoding="utf-8")
@@ -237,6 +242,7 @@ def export_slides_json(
                 ocr_text=ocr_text,
                 visual_elements=visual_elements,
                 ai_description=ai_description,
+                pdf_text=pdf_text,
             )
             slide_sections.append(section)
 
@@ -334,6 +340,7 @@ def _build_slide_section(
     ocr_text: str,
     visual_elements: list[str],
     ai_description: str = "",
+    pdf_text: str = "",
 ) -> str:
     """Build Markdown section for a slide in combined mode."""
     slide_id = f"slide_{slide_index:03d}"
@@ -341,11 +348,27 @@ def _build_slide_section(
         f'<a name="{slide_id}"></a>',
         f"## Slide {slide_index}",
         "",
-        f"**Time:** {_format_timestamp(t_start)} - {_format_timestamp(t_end)}",
-        "",
+    ]
+
+    # Only show time for videos (not PDFs)
+    if t_start > 0 or t_end > 0:
+        lines.extend([
+            f"**Time:** {_format_timestamp(t_start)} - {_format_timestamp(t_end)}",
+            "",
+        ])
+
+    lines.extend([
         f"[![Slide](slides/{image_filename})](slides/{image_filename})",
         "",
-    ]
+    ])
+
+    if pdf_text:
+        lines.extend([
+            "### PDF Embedded Text",
+            "",
+            pdf_text,
+            "",
+        ])
 
     if transcript_text:
         lines.extend([
@@ -393,14 +416,23 @@ def _build_slide_markdown(
     ocr_text: str,
     visual_elements: list[str],
     ai_description: str = "",
+    pdf_text: str = "",
 ) -> str:
     """Build Markdown content for a single slide in split mode."""
     lines = [
         "---",
         f"id: {slide_id}",
         f"index: {slide_index}",
-        f"time_start: {t_start}",
-        f"time_end: {t_end}",
+    ]
+
+    # Only add time for videos (not PDFs)
+    if t_start > 0 or t_end > 0:
+        lines.extend([
+            f"time_start: {t_start}",
+            f"time_end: {t_end}",
+        ])
+
+    lines.extend([
         f"image: slides/{image_filename}",
         "---",
         "",
@@ -408,7 +440,15 @@ def _build_slide_markdown(
         "",
         f"[![Slide Image](slides/{image_filename})](slides/{image_filename})",
         "",
-    ]
+    ])
+
+    if pdf_text:
+        lines.extend([
+            "## PDF Embedded Text",
+            "",
+            pdf_text,
+            "",
+        ])
 
     if transcript_text:
         lines.extend([
