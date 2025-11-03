@@ -123,6 +123,16 @@ class TorchQwen3Describer:
         from PIL import Image  # type: ignore[import-untyped]
         image = Image.open(image_path)
 
+        # Resize to reduce vision tokens (1 token per 28x28 or 32x32 pixels)
+        # Target: ~1200 tokens max (1024x768 = ~1200 tokens vs 1920x1080 = ~2500 tokens)
+        max_dimension = 1280  # Good balance: readable formulas, faster processing
+        if image.width > max_dimension or image.height > max_dimension:
+            # Preserve aspect ratio
+            scale = min(max_dimension / image.width, max_dimension / image.height)
+            new_size = (int(image.width * scale), int(image.height * scale))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            logger.debug(f"Resized image from {image_path.name} to {new_size} for faster processing")
+
         # Build messages (format: system message as string, user content as list)
         messages = [
             {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
