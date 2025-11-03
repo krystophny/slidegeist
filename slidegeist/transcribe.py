@@ -289,36 +289,61 @@ def transcribe_video(
                 else:
                     eta_str = "ETA: calculating..."
 
-                # Print progress bar to console
-                bar_width = 40
+                # Print progress bar to console (responsive to terminal width)
+                try:
+                    import shutil
+                    terminal_width = shutil.get_terminal_size((80, 20)).columns
+                except Exception:
+                    terminal_width = 80
+
+                # Calculate bar width based on terminal size
+                # Reserve space for: []  XX.X% | Pos | Speed | ETA (~60 chars)
+                bar_width = max(20, min(40, terminal_width - 65))
                 filled = int(bar_width * progress_pct / 100)
                 bar = "█" * filled + "░" * (bar_width - filled)
 
-                print(
+                progress_line = (
                     f"\r[{bar}] {progress_pct:.1f}% | "
-                    f"Position: {current_position / 60:.1f}min/{video_duration / 60:.1f}min | "
-                    f"Speed: {speed_factor:.2f}x | {eta_str}",
-                    end="",
-                    file=sys.stderr,
-                    flush=True,
+                    f"{current_position / 60:.1f}/{video_duration / 60:.1f}min | "
+                    f"{speed_factor:.1f}x | {eta_str}"
                 )
+
+                # Truncate if still too long
+                if len(progress_line) > terminal_width:
+                    progress_line = progress_line[:terminal_width - 3] + "..."
+
+                print(progress_line, end="", file=sys.stderr, flush=True)
             else:
                 # No duration info, just show position and speed
                 speed_factor = current_position / elapsed if elapsed > 0 else 0
-                print(
+                try:
+                    import shutil
+                    terminal_width = shutil.get_terminal_size((80, 20)).columns
+                except Exception:
+                    terminal_width = 80
+
+                progress_line = (
                     f"\rProcessed: {current_position / 60:.1f}min | "
-                    f"Speed: {speed_factor:.2f}x | "
-                    f"Elapsed: {elapsed / 60:.1f}min",
-                    end="",
-                    file=sys.stderr,
-                    flush=True,
+                    f"Speed: {speed_factor:.1f}x | "
+                    f"Elapsed: {elapsed / 60:.1f}min"
                 )
+
+                # Truncate if too long
+                if len(progress_line) > terminal_width:
+                    progress_line = progress_line[:terminal_width - 3] + "..."
+
+                print(progress_line, end="", file=sys.stderr, flush=True)
 
             last_progress_time = current_time
 
     # Clear progress line and show final stats
-    if video_duration:
-        print("\r" + " " * 120 + "\r", end="", file=sys.stderr, flush=True)
+    try:
+        import shutil
+        terminal_width = shutil.get_terminal_size((80, 20)).columns
+    except Exception:
+        terminal_width = 120
+
+    print("\r" + " " * terminal_width + "\r", end="", file=sys.stderr, flush=True)
 
     total_time = time.time() - start_time
     speed_factor = video_duration / total_time if video_duration and total_time > 0 else 0
