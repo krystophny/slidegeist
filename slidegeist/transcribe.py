@@ -2,7 +2,6 @@
 
 import logging
 import platform
-import sys
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -104,26 +103,21 @@ def transcribe_video(
     device: str = DEFAULT_DEVICE,
     compute_type: str = "int8",
 ) -> TranscriptResult:
-    """Transcribe video audio using faster-whisper.
+    """Transcribe video audio using OpenAI Whisper (PyTorch backend).
 
     Args:
         video_path: Path to the video file.
         model_size: Whisper model size: tiny, base, small, medium, large-v3, large-v2, large.
         device: Device to use: 'cpu', 'cuda', or 'auto' (auto-detects MLX on Apple Silicon).
-        compute_type: Computation type for CTranslate2.
-                     Use 'int8' for CPU, 'float16' for GPU.
+        compute_type: Computation type (unused, kept for API compatibility).
 
     Returns:
         Dictionary with language and segments containing timestamped text.
 
     Raises:
-        ImportError: If faster-whisper is not installed.
+        ImportError: If openai-whisper is not installed.
         Exception: If transcription fails.
     """
-    try:
-        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
-    except ImportError:
-        raise ImportError("faster-whisper not installed. Install with: pip install faster-whisper")
 
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
@@ -196,13 +190,13 @@ def transcribe_video(
             logger.info(f"MLX transcription complete: {len(mlx_segments)} segments")
             return {"language": result.get("language", "unknown"), "segments": mlx_segments}
         except ImportError as e:
-            logger.warning(f"MLX import failed: {e}, falling back to faster-whisper")
+            logger.warning(f"MLX import failed: {e}, falling back to openai-whisper")
             use_mlx = False
         except (KeyError, AttributeError, TypeError) as e:
-            logger.warning(f"MLX data format error: {e}, falling back to faster-whisper")
+            logger.warning(f"MLX data format error: {e}, falling back to openai-whisper")
             use_mlx = False
         except Exception as e:
-            logger.error(f"MLX transcription crashed: {e}, falling back to faster-whisper")
+            logger.error(f"MLX transcription crashed: {e}, falling back to openai-whisper")
             logger.debug("Full traceback:", exc_info=True)
             use_mlx = False
 
@@ -228,12 +222,14 @@ def transcribe_video(
     start_time = time.time()
 
     # Transcribe with OpenAI Whisper
+    # Note: OpenAI Whisper shows built-in progress when verbose=True (default)
     result = model.transcribe(
         str(video_path),
         word_timestamps=True,
         compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
         logprob_threshold=LOG_PROB_THRESHOLD,
         no_speech_threshold=NO_SPEECH_THRESHOLD,
+        verbose=True,  # Show Whisper's built-in progress output
     )
 
     # Extract segments
