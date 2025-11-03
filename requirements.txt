@@ -1,13 +1,19 @@
 # Core dependencies (exact versions for reproducibility)
-numpy==2.2.1
-opencv-python==4.10.0.84
-yt-dlp==2024.12.23
+numpy==2.3.4
+opencv-python==4.12.0.88
+yt-dlp>=2024.12.0
 pytesseract==0.3.13
-Pillow==11.0.0
+Pillow==11.3.0
 tqdm==4.67.1
 psutil==7.0.0
 
-# whisper.cpp and llama.cpp Python bindings
-pywhispercpp==1.3.3
-llama-cpp-python==0.3.16
-huggingface-hub==0.28.1
+# Whisper transcription (PyTorch backend, works with any CUDA version)
+openai-whisper==20250625
+torch==2.9.0
+torchaudio==2.9.0
+
+# Qwen3-VL-8B AI descriptions (PyTorch with 8-bit quantization)
+transformers==4.57.1
+torchvision==0.24.0
+accelerate==1.11.0
+bitsandbytes==0.48.2

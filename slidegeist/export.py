@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from slidegeist.ai_description import LlamaCppQwen3Describer
+from slidegeist.ai_description import TorchQwen3Describer
 from slidegeist.ocr import OcrPipeline
 from slidegeist.transcribe import Segment
 
@@ -474,7 +474,7 @@ def _build_combined_markdown(
 def run_ai_descriptions(
     slide_metadata: list[tuple[int, float, float, Path]],
     transcript_segments: list[Segment],
-    describer: LlamaCppQwen3Describer,
+    describer: TorchQwen3Describer,
     ocr_pipeline: OcrPipeline | None = None,
 ) -> dict[str, str]:
     """Run AI descriptions on all slides.

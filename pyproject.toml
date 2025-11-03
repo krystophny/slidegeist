@@ -36,9 +36,11 @@ dependencies = [
     "tqdm>=4.67.0,<5.0",
     "psutil>=7.0.0,<8.0",
     "openai-whisper>=20231117",  # PyTorch backend, works with any CUDA version
-    "torch>=2.0.0",  # Required for Whisper
-    "llama-cpp-python>=0.3.0,<1.0",
-    "huggingface-hub>=0.28.0,<1.0",
+    "torch>=2.0.0",  # Required for Whisper and Qwen3-VL
+    "transformers>=4.30.0",  # Required for Qwen3-VL
+    "torchvision>=0.15.0",  # Required for Qwen3-VL image processing
+    "accelerate>=0.20.0",  # Required for efficient GPU loading
+    "bitsandbytes>=0.40.0",  # Required for 8-bit quantization of Qwen3-VL
 ]
 
 [project.optional-dependencies]

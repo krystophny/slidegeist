@@ -113,37 +113,37 @@ OUTPUT REQUIREMENTS:
 - Prioritize accuracy over brevity"""
 
 
-class LlamaCppQwen3Describer:
-    """AI slide describer using Qwen3-VL via llama.cpp (CUDA/CPU with GPU offload)."""
+class TorchQwen3Describer:
+    """AI slide describer using Qwen3-VL-8B via PyTorch with full CUDA support."""
 
-    # Qwen3-VL-30B-A3B GGUF models from unsloth
-    MODEL_ID = "unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF"
-    MODEL_FILE = "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf"
-    MMPROJ_FILE = "mmproj-F16.gguf"
+    MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 
     def __init__(
         self,
         max_new_tokens: int = 2048,
         temperature: float = 0.3,
-        n_gpu_layers: int = 50,
-        main_gpu: int = 0,
+        device: str = "auto",
     ) -> None:
-        self.name = "Qwen3-VL-30B (llama.cpp)"
+        self.name = "Qwen3-VL-8B (PyTorch)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self.n_gpu_layers = n_gpu_layers
-        self.main_gpu = main_gpu
-        self._llm = None
+        self.device = device
+        self._model = None
+        self._processor = None
         self._available = False
 
         try:
-            import llama_cpp  # type: ignore[import-untyped]
+            import torch  # type: ignore[import-untyped]
+            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig  # type: ignore[import-untyped]
 
-            self._llama_cpp = llama_cpp
+            self._torch = torch
+            self._Qwen3VLForConditionalGeneration = Qwen3VLForConditionalGeneration
+            self._AutoProcessor = AutoProcessor
+            self._BitsAndBytesConfig = BitsAndBytesConfig
             self._available = True
-            logger.info("llama-cpp-python available for Qwen3-VL descriptions")
-        except ImportError:
-            logger.debug("llama-cpp-python not installed")
+            logger.info("PyTorch with transformers available for Qwen3-VL descriptions")
+        except ImportError as e:
+            logger.debug(f"PyTorch/transformers not installed: {e}")
 
     def is_available(self) -> bool:
         return self._available
@@ -153,103 +153,114 @@ class LlamaCppQwen3Describer:
             return ""
 
         self._ensure_loaded()
-        if self._llm is None:
+        if self._model is None or self._processor is None:
             return ""
 
         system_instruction = get_system_instruction()
         user_text = get_user_prompt(transcript, ocr_text)
 
-        # Convert image to data URI for llama-cpp-python
-        import base64
+        # Load image
+        from PIL import Image  # type: ignore[import-untyped]
+        image = Image.open(image_path)
 
-        with open(image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-        image_uri = f"data:image/jpeg;base64,{image_data}"
-
+        # Build messages
         messages = [
             {"role": "system", "content": system_instruction},
             {
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": image_uri}},
+                    {"type": "image", "image": image},
                     {"type": "text", "text": user_text},
                 ],
             },
         ]
 
-        response = self._llm.create_chat_completion(
-            messages=messages,
-            max_tokens=self.max_new_tokens,
-            temperature=self.temperature,
+        # Process inputs
+        text_prompt = self._processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
         )
+        inputs = self._processor(
+            text=[text_prompt],
+            images=[image],
+            return_tensors="pt",
+            padding=True,
+        )
+        inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
-        raw_output = response["choices"][0]["message"]["content"]
-        return clean_text(raw_output)
+        # Generate
+        with self._torch.no_grad():
+            output_ids = self._model.generate(
+                **inputs,
+                max_new_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+                do_sample=True if self.temperature > 0 else False,
+            )
+
+        # Decode
+        generated_ids = [
+            output_ids[len(input_ids) :]
+            for input_ids, output_ids in zip(inputs["input_ids"], output_ids)
+        ]
+        output_text = self._processor.batch_decode(
+            generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+
+        return clean_text(output_text)
 
     def _ensure_loaded(self) -> None:
-        if self._llm is not None:
+        if self._model is not None:
             return
 
-        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-
         logger.info(f"Loading {self.MODEL_ID}...")
-        logger.info(
-            f"GPU layers: {self.n_gpu_layers}, "
-            f"GPU: {self.main_gpu}, "
-            f"Max tokens: {self.max_new_tokens}"
-        )
 
-        # Download model and mmproj if needed
-        model_path = self._download_model(self.MODEL_FILE)
-        mmproj_path = self._download_model(self.MMPROJ_FILE)
+        # Determine device
+        if self.device == "auto":
+            if self._torch.cuda.is_available():
+                self._device = "cuda"
+                logger.info(f"Using CUDA GPU: {self._torch.cuda.get_device_name(0)}")
+            else:
+                self._device = "cpu"
+                logger.info("Using CPU (no CUDA available)")
+        else:
+            self._device = self.device
 
-        # Initialize chat handler with mmproj
-        chat_handler = Qwen25VLChatHandler(clip_model_path=str(mmproj_path), verbose=False)
+        # Load model and processor with 8-bit quantization
+        import gc
+        self._torch.cuda.empty_cache()
+        gc.collect()
 
-        # Load model with GPU offload
-        self._llm = self._llama_cpp.Llama(
-            model_path=str(model_path),
-            chat_handler=chat_handler,
-            n_gpu_layers=self.n_gpu_layers,
-            main_gpu=self.main_gpu,
-            n_ctx=4096,
-            verbose=False,
-        )
-
-    def _download_model(self, filename: str) -> Path:
-        """Download model file from HuggingFace if needed."""
-        cache_dir = Path.home() / ".cache" / "slidegeist" / "models"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        model_file = cache_dir / filename
-
-        if model_file.exists():
-            logger.info(f"Using cached model: {model_file}")
-            return model_file
-
-        logger.info(f"Downloading {filename} from HuggingFace...")
-        try:
-            from huggingface_hub import hf_hub_download  # type: ignore[import-untyped]
-
-            downloaded_path = hf_hub_download(
-                repo_id=self.MODEL_ID, filename=filename, cache_dir=str(cache_dir)
+        if self._device == "cuda":
+            # Use 8-bit quantization for CUDA (fits comfortably in 16GB VRAM)
+            bnb_config = self._BitsAndBytesConfig(
+                load_in_8bit=True,
+                bnb_8bit_compute_dtype=self._torch.float16,
             )
-            return Path(downloaded_path)
-        except ImportError:
-            raise ImportError(
-                "huggingface_hub not installed. Install with: pip install huggingface-hub"
+            self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
+                self.MODEL_ID,
+                quantization_config=bnb_config,
+                device_map="auto",
             )
-        except Exception as e:
-            raise RuntimeError(f"Failed to download {filename}: {e}") from e
+        else:
+            # CPU: load in full precision
+            self._model = self._Qwen3VLForConditionalGeneration.from_pretrained(
+                self.MODEL_ID,
+                dtype=self._torch.float32,
+                device_map="cpu",
+            )
+
+        self._processor = self._AutoProcessor.from_pretrained(self.MODEL_ID)
+
+        logger.info(f"Model loaded on {self._device}")
 
 
-def build_ai_describer() -> LlamaCppQwen3Describer | None:
-    """Build AI describer using llama.cpp."""
+def build_ai_describer() -> TorchQwen3Describer | None:
+    """Build AI describer using PyTorch."""
     import os
 
     if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() in {"1", "true", "yes"}:
         return None
 
-    describer = LlamaCppQwen3Describer()
+    describer = TorchQwen3Describer()
     if describer.is_available():
         return describer
 
