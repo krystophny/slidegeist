@@ -21,6 +21,84 @@ from slidegeist.transcribe import transcribe_video
 logger = logging.getLogger(__name__)
 
 
+def has_existing_slides(output_dir: Path) -> bool:
+    """Check if output directory contains extracted slides.
+
+    Args:
+        output_dir: Directory to check for slides.
+
+    Returns:
+        True if slides subdirectory exists with image files, False otherwise.
+    """
+    slides_dir = output_dir / "slides"
+    if not slides_dir.exists():
+        return False
+
+    image_extensions = {".jpg", ".jpeg", ".png"}
+    slide_files = [f for f in slides_dir.iterdir() if f.suffix.lower() in image_extensions]
+    return len(slide_files) > 0
+
+
+def find_video_file(output_dir: Path) -> Path | None:
+    """Find video file in output directory.
+
+    Args:
+        output_dir: Directory to search for video file.
+
+    Returns:
+        Path to video file if found, None otherwise.
+    """
+    if not output_dir.exists():
+        return None
+
+    video_extensions = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
+    for file in output_dir.iterdir():
+        if file.suffix.lower() in video_extensions:
+            return file
+
+    return None
+
+
+def can_resume_from_slides(output_dir: Path) -> bool:
+    """Check if processing can resume from existing slides.
+
+    Args:
+        output_dir: Directory to check.
+
+    Returns:
+        True if directory has both video file and extracted slides, False otherwise.
+    """
+    return find_video_file(output_dir) is not None and has_existing_slides(output_dir)
+
+
+def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, float, Path]]:
+    """Load metadata for existing slides in output directory.
+
+    Args:
+        output_dir: Directory containing slides subdirectory.
+
+    Returns:
+        List of tuples (slide_number, start_time, end_time, path) for each slide.
+        Times are set to 0.0 as they need to be reconstructed from scene detection
+        or transcript data.
+    """
+    slides_dir = output_dir / "slides"
+    if not slides_dir.exists():
+        return []
+
+    image_extensions = {".jpg", ".jpeg", ".png"}
+    slide_files = sorted(
+        [f for f in slides_dir.iterdir() if f.suffix.lower() in image_extensions],
+        key=lambda p: p.name,
+    )
+
+    metadata: list[tuple[int, float, float, Path]] = []
+    for idx, slide_path in enumerate(slide_files, start=1):
+        metadata.append((idx, 0.0, 0.0, slide_path))
+
+    return metadata
+
+
 def process_video(
     video_path: Path,
     output_dir: Path,
@@ -58,12 +136,22 @@ def process_video(
     logger.info(f"Processing video: {video_path}")
     logger.info(f"Output directory: {output_dir}")
 
+    # Check if we can resume from existing work
+    resume_from_slides = can_resume_from_slides(output_dir) and not skip_slides
+    if resume_from_slides:
+        logger.info("=" * 60)
+        logger.info("Found existing slides - resuming from transcription")
+        logger.info("=" * 60)
+        skip_slides = True
+        existing_video = find_video_file(output_dir)
+        if existing_video:
+            video_path = existing_video
+            logger.info(f"Using existing video: {video_path}")
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results: dict[str, Path | list[Path]] = {
-        'output_dir': output_dir
-    }
+    results: dict[str, Path | list[Path]] = {"output_dir": output_dir}
 
     # Step 1: Scene detection (needed for slides)
     slide_metadata: list[tuple[int, float, float, Path]] = []
@@ -77,7 +165,7 @@ def process_video(
             video_path,
             threshold=scene_threshold,
             min_scene_len=min_scene_len,
-            start_offset=start_offset
+            start_offset=start_offset,
         )
 
         if not scene_timestamps:
@@ -88,13 +176,12 @@ def process_video(
         logger.info("STEP 2: Slide Extraction")
         logger.info("=" * 60)
 
-        slide_metadata = extract_slides(
-            video_path,
-            scene_timestamps,
-            output_dir,
-            image_format
-        )
-        results['slides'] = [path for _, _, _, path in slide_metadata]
+        slide_metadata = extract_slides(video_path, scene_timestamps, output_dir, image_format)
+        results["slides"] = [path for _, _, _, path in slide_metadata]
+    elif resume_from_slides:
+        slide_metadata = load_existing_slide_metadata(output_dir)
+        results["slides"] = [path for _, _, _, path in slide_metadata]
+        logger.info(f"Loaded {len(slide_metadata)} existing slides")
 
     # Step 3: Transcription
     transcript_segments = []
@@ -103,12 +190,8 @@ def process_video(
         logger.info("STEP 3: Audio Transcription")
         logger.info("=" * 60)
 
-        transcript_data = transcribe_video(
-            video_path,
-            model_size=model,
-            device=device
-        )
-        transcript_segments = transcript_data['segments']
+        transcript_data = transcribe_video(video_path, model_size=model, device=device)
+        transcript_segments = transcript_data["segments"]
 
     # Step 4: Export slides markdown (requires both slides and transcription)
     if not skip_slides and not skip_transcription:
@@ -129,7 +212,7 @@ def process_video(
             source_url=source_url,
             split_slides=split_slides,
         )
-        results['slides_md'] = markdown_path
+        results["slides_md"] = markdown_path
 
     # Summary
     logger.info("=" * 60)
@@ -152,7 +235,7 @@ def process_slides_only(
     scene_threshold: float = DEFAULT_SCENE_THRESHOLD,
     min_scene_len: float = DEFAULT_MIN_SCENE_LEN,
     start_offset: float = DEFAULT_START_OFFSET,
-    image_format: str = DEFAULT_IMAGE_FORMAT
+    image_format: str = DEFAULT_IMAGE_FORMAT,
 ) -> dict:
     """Extract only slides from video (no transcription).
 
@@ -175,6 +258,6 @@ def process_slides_only(
         min_scene_len=min_scene_len,
         start_offset=start_offset,
         image_format=image_format,
-        skip_transcription=True
+        skip_transcription=True,
     )
     return result

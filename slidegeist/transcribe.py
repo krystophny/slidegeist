@@ -39,6 +39,20 @@ def is_mlx_available() -> bool:
         return False
 
 
+def is_cuda_available() -> bool:
+    """Check if CUDA GPU is available.
+
+    Returns:
+        True if CUDA GPU is available and working, False otherwise.
+    """
+    try:
+        import torch  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
 class Word(TypedDict):
     """A single word with timing information."""
 
@@ -93,13 +107,16 @@ def transcribe_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
-    # Auto-detect MLX on Apple Silicon
+    # Auto-detect best available device
     use_mlx = False
     if device == "auto":
         if is_mlx_available():
             use_mlx = True
             device = "cpu"  # MLX uses its own backend
             logger.info("MLX detected - using MLX-optimized Whisper for Apple Silicon")
+        elif is_cuda_available():
+            device = "cuda"
+            logger.info("CUDA GPU detected - using GPU acceleration")
         elif platform.system() == "Darwin" and platform.machine() == "arm64":
             device = "cpu"
             logger.info(
@@ -167,8 +184,9 @@ def transcribe_video(
     cpu_threads = 0
     num_workers = 1
 
-    logger.info(f"Loading Whisper model: {model_size} on {device}")
-    logger.info(f"CPU threads: auto-detect (all cores), num_workers: {num_workers}")
+    logger.info(f"Loading Whisper model: {model_size} on {device} (compute_type: {compute_type})")
+    if device == "cpu":
+        logger.info(f"CPU threads: auto-detect (all cores), num_workers: {num_workers}")
 
     model = WhisperModel(
         model_size,

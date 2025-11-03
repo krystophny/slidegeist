@@ -45,7 +45,11 @@ slidegeist slides video.mp4                 # Extract only slides (no transcript
 
 ### Processing Pipeline (pipeline.py)
 
-The main `process_video()` function orchestrates three steps:
+The main `process_video()` function orchestrates processing with smart resume capabilities:
+
+**Smart Resume**: If output directory contains both a video file and a slides subdirectory with images, automatically skips slide extraction and resumes from transcription. This enables re-running slidegeist with the same URL to add transcription to existing slides.
+
+**Processing Steps**:
 
 1. **Scene Detection** (ffmpeg_scene.py): Uses FFmpeg's SAD-based scene filter with Opencast-style optimization
    - Iteratively adjusts threshold to target ~30 segments/hour (typical lecture pace)
@@ -93,11 +97,12 @@ Two complementary implementations exist:
 ### Device and Model Selection
 
 - Device selection logic in transcribe.py:
-  - `auto`: Detects MLX on Apple Silicon, falls back to CPU
-  - `cuda`: NVIDIA GPU (requires PyTorch with CUDA installed first)
+  - `auto`: Auto-detects best device in priority order: MLX (Apple Silicon) → CUDA (NVIDIA GPU) → CPU
+  - `cuda`: Explicit NVIDIA GPU usage (requires PyTorch with CUDA installed)
   - `cpu`: Explicit CPU usage
 - Whisper models: tiny, base, small, medium, large-v2, large-v3 (default)
 - Compute type auto-adjusted: `int8` for CPU, `float16` for CUDA
+- CUDA detection uses `torch.cuda.is_available()` when PyTorch is installed
 
 ## Testing Strategy
 
