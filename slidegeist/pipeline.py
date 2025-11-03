@@ -99,6 +99,76 @@ def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, flo
     return metadata
 
 
+def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
+    """Detect which processing stages have been completed.
+
+    Analyzes slides.md or index.md to determine what's already done.
+
+    Args:
+        output_dir: Directory to check.
+
+    Returns:
+        Dict with keys: 'slides', 'transcription', 'ocr', 'ai_description'
+        Each value is True if that stage is completed.
+    """
+    stages = {
+        "slides": False,
+        "transcription": False,
+        "ocr": False,
+        "ai_description": False,
+    }
+
+    # Check for slides directory
+    stages["slides"] = has_existing_slides(output_dir)
+
+    # Check markdown files for content
+    markdown_path = output_dir / "slides.md"
+    if not markdown_path.exists():
+        markdown_path = output_dir / "index.md"
+
+    if not markdown_path.exists():
+        return stages
+
+    try:
+        content = markdown_path.read_text(encoding="utf-8")
+
+        # Detect transcription: look for "### Transcript" sections with content
+        if "### Transcript" in content:
+            # Check if there's actual transcript content (not just empty sections)
+            lines = content.split("\n")
+            found_transcript_content = False
+
+            for i, line in enumerate(lines):
+                if line.strip() == "### Transcript":
+                    # Check next few lines for non-empty content
+                    for j in range(i + 1, min(i + 10, len(lines))):
+                        next_line = lines[j].strip()
+                        # Stop at next section or separator
+                        if next_line.startswith("#") or next_line == "---":
+                            break
+                        # Found actual content
+                        if next_line and not next_line.startswith("**"):
+                            found_transcript_content = True
+                            break
+                    if found_transcript_content:
+                        break
+
+            stages["transcription"] = found_transcript_content
+
+        # Detect OCR: look for "### OCR Text" or "## OCR Text" sections
+        if "OCR Text" in content:
+            stages["ocr"] = True
+
+        # Detect AI descriptions: look for "### AI Description" sections
+        if "AI Description" in content:
+            stages["ai_description"] = True
+
+    except Exception as e:
+        logger.debug(f"Could not parse markdown for stage detection: {e}")
+
+    return stages
+
+
 def process_video(
     video_path: Path,
     output_dir: Path,
@@ -136,12 +206,19 @@ def process_video(
     logger.info(f"Processing video: {video_path}")
     logger.info(f"Output directory: {output_dir}")
 
+    # Detect which stages are already completed
+    completed_stages = detect_completed_stages(output_dir)
+    logger.info("=" * 60)
+    logger.info("STAGE DETECTION")
+    logger.info("=" * 60)
+    logger.info(f"✓ Slides extracted: {completed_stages['slides']}")
+    logger.info(f"✓ Transcription done: {completed_stages['transcription']}")
+    logger.info(f"✓ OCR done: {completed_stages['ocr']}")
+    logger.info(f"✓ AI descriptions done: {completed_stages['ai_description']}")
+
     # Check if we can resume from existing work
-    resume_from_slides = can_resume_from_slides(output_dir) and not skip_slides
-    if resume_from_slides:
-        logger.info("=" * 60)
-        logger.info("Found existing slides - resuming from transcription")
-        logger.info("=" * 60)
+    resume_from_existing = completed_stages["slides"] and not skip_slides
+    if resume_from_existing:
         existing_video = find_video_file(output_dir)
         if existing_video:
             video_path = existing_video
@@ -156,8 +233,11 @@ def process_video(
     slide_metadata: list[tuple[int, float, float, Path]] = []
     scene_timestamps: list[float] = []
 
-    if resume_from_slides:
+    if completed_stages["slides"] and not skip_slides:
         # Resume: load existing slides without re-extraction
+        logger.info("=" * 60)
+        logger.info("STEP 1: Loading existing slides")
+        logger.info("=" * 60)
         slide_metadata = load_existing_slide_metadata(output_dir)
         results["slides"] = [path for _, _, _, path in slide_metadata]
         logger.info(f"Loaded {len(slide_metadata)} existing slides")
@@ -200,30 +280,47 @@ def process_video(
         )
         results["slides_md"] = markdown_path
 
-    # Step 3: Transcription
+    # Step 3: Transcription (skip if already done)
     transcript_segments = []
-    if not skip_transcription:
+    transcription_needed = not skip_transcription and not completed_stages["transcription"]
+
+    if transcription_needed:
         logger.info("=" * 60)
         logger.info("STEP 3: Audio Transcription")
         logger.info("=" * 60)
 
         transcript_data = transcribe_video(video_path, model_size=model, device=device)
         transcript_segments = transcript_data["segments"]
+    elif completed_stages["transcription"]:
+        logger.info("=" * 60)
+        logger.info("STEP 3: Transcription already completed (skipping)")
+        logger.info("=" * 60)
 
-    # Step 4: Update markdown with transcript (if both slides and transcript exist)
+    # Step 4: Update/re-run markdown export
+    # Always run export if we did any new processing, OR if OCR/AI stages need updating
     has_slides = len(slide_metadata) > 0
-    has_transcript = len(transcript_segments) > 0
+    has_new_data = transcription_needed  # Did we just run transcription?
+    needs_ocr_update = has_slides and not completed_stages["ocr"]
+    needs_ai_update = has_slides and not completed_stages["ai_description"]
 
-    if has_slides and has_transcript:
+    # Re-export if: new transcription, need OCR, or need AI descriptions
+    should_export = has_slides and (has_new_data or needs_ocr_update or needs_ai_update)
+
+    if should_export:
         logger.info("=" * 60)
-        logger.info("STEP 4: Update slides markdown with transcript")
+        logger.info("STEP 4: Updating slides markdown")
         logger.info("=" * 60)
+
+        if needs_ocr_update:
+            logger.info("Running OCR on slides...")
+        if needs_ai_update:
+            logger.info("Generating AI descriptions...")
 
         markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
         export_slides_json(
             video_path,
             slide_metadata,
-            transcript_segments,
+            transcript_segments,  # Empty if transcription was skipped
             markdown_path,
             model,
             ocr_pipeline=ocr_pipeline,
@@ -237,13 +334,16 @@ def process_video(
     logger.info("PROCESSING COMPLETE")
     logger.info("=" * 60)
     if has_slides:
-        action = "Loaded" if resume_from_slides else "Extracted"
+        action = "Loaded" if completed_stages["slides"] else "Extracted"
         logger.info(f"✓ {action} {len(slide_metadata)} slides")
-    if has_transcript:
-        logger.info("✓ Transcribed audio")
-    if has_slides:
-        status = "with transcript" if has_transcript else "(checkpoint saved)"
-        logger.info(f"✓ Created slides markdown {status}")
+    if completed_stages["transcription"] or transcription_needed:
+        logger.info("✓ Transcription available")
+    if completed_stages["ocr"] or needs_ocr_update:
+        logger.info("✓ OCR complete")
+    if completed_stages["ai_description"] or needs_ai_update:
+        logger.info("✓ AI descriptions generated")
+    if should_export:
+        logger.info("✓ Updated slides markdown")
     logger.info(f"✓ All outputs in: {output_dir}")
 
     return results
