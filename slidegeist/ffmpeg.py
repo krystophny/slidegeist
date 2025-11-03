@@ -128,6 +128,45 @@ def detect_scenes(
     return timestamps
 
 
+def extract_audio(
+    video_path: Path,
+    output_path: Path,
+    sample_rate: int = 16000
+) -> None:
+    """Extract audio from video file as 16kHz mono WAV for whisper.cpp.
+
+    Args:
+        video_path: Path to the video file.
+        output_path: Path where the audio WAV will be saved.
+        sample_rate: Output sample rate in Hz (whisper.cpp expects 16kHz).
+
+    Raises:
+        FFmpegError: If audio extraction fails.
+    """
+    if not check_ffmpeg_available():
+        raise FFmpegError("FFmpeg not found. Please install FFmpeg.")
+
+    # Ensure output directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-i", str(video_path),
+        "-vn",  # No video
+        "-acodec", "pcm_s16le",  # 16-bit PCM
+        "-ar", str(sample_rate),  # Resample to 16kHz
+        "-ac", "1",  # Mono
+        "-y",  # Overwrite output file
+        str(output_path)
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        logger.info(f"Extracted audio to {output_path}")
+    except subprocess.CalledProcessError as e:
+        raise FFmpegError(f"Failed to extract audio: {e.stderr}")
+
+
 def extract_frame(
     video_path: Path,
     timestamp: float,
