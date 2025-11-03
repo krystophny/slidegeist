@@ -2,30 +2,82 @@
 
 import logging
 import platform
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
+def clean_text(text: str) -> str:
+    """Remove artifacts and normalize spacing."""
+    text = re.sub(r"\s+", " ", text)
+    valid_chars = set(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "äöüßÄÖÜ"
+        "àâéèêëïîôùûüÿçÀÂÉÈÊËÏÎÔÙÛÜŸÇ"
+        "0123456789"
+        " .,;:!?()[]{}+-=*/<>|\\@#$%^&_~'\"`\n\t"
+    )
+    cleaned = "".join(c for c in text if c in valid_chars or c.isalpha() or c.isdigit())
+    return cleaned.strip()
+
+
 def get_system_instruction() -> str:
     return (
-        "You are an expert at analyzing academic and professional presentation slides. "
-        "Describe the slide in extreme detail so another AI could recreate it perfectly in LaTeX Beamer. "
-        "Include: all text verbatim, layout structure, font sizes/styles, colors, "
-        "mathematical formulas (in LaTeX), diagrams (describe for TikZ/SVG recreation), "
-        "charts/graphs (describe data and styling), images (describe content and placement), "
-        "bullet points, numbering, alignment, spacing, and any visual elements."
+        "You are an expert at analyzing presentation slides for AI-to-AI processing. "
+        "Provide structured, machine-readable descriptions that enable reconstruction "
+        "in multiple formats: LaTeX Beamer, SVG, JavaScript, Jupyter notebooks, Quarto markdown. "
+        "Focus on precision and completeness over brevity."
     )
 
 
-def get_user_prompt(transcript: str) -> str:
-    context_info = f"\n\nTranscript context: {transcript[:500]}" if transcript else ""
-    return (
-        "Analyze this presentation slide and provide an exhaustive description "
-        "that would allow another AI to recreate it pixel-perfectly in LaTeX Beamer, "
-        "with TikZ/SVG for diagrams and proper formatting for all visual elements."
-        f"{context_info}"
-    )
+def get_user_prompt(transcript: str, ocr_text: str) -> str:
+    """Build comprehensive prompt for slide description.
+
+    Args:
+        transcript: Speaker transcript (may be empty)
+        ocr_text: Tesseract OCR output (may contain artifacts)
+    """
+    context_parts = []
+
+    if transcript:
+        context_parts.append(f"Speaker transcript: {transcript[:500]}")
+
+    if ocr_text:
+        context_parts.append(
+            f"OCR text (may contain artifacts): {ocr_text[:500]}"
+        )
+
+    context = "\n".join(context_parts) if context_parts else "No context available"
+
+    return f"""Analyze this slide and generate a structured description with these sections:
+
+1. TOPIC: Main subject (1-3 words)
+2. TITLE: Suggested slide title
+3. TEXT_CONTENT:
+   - All machine-written text (typed, printed)
+   - All handwritten text
+   - Preserve exact wording and formatting
+4. FORMULAS:
+   - Mathematical expressions in LaTeX notation
+   - Include inline and display equations
+5. VISUAL_ELEMENTS:
+   - Diagrams, flowcharts, plots, charts
+   - Describe structure for SVG/TikZ recreation
+   - Arrows, boxes, annotations with positions
+6. TABLES:
+   - Structure (rows, columns, headers)
+   - All cell contents
+7. SYMBOLS:
+   - Special symbols, icons, markers
+8. LAYOUT:
+   - Spatial arrangement
+   - Alignment, spacing, hierarchy
+
+Context:
+{context}
+
+Provide complete, precise descriptions suitable for programmatic processing."""
 
 
 class MlxQwen3Describer:
@@ -62,7 +114,7 @@ class MlxQwen3Describer:
     def is_available(self) -> bool:
         return self._available
 
-    def describe(self, image_path: Path, transcript: str) -> str:
+    def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:
         if not self._available:
             return ""
 
@@ -71,7 +123,7 @@ class MlxQwen3Describer:
             return ""
 
         system_instruction = get_system_instruction()
-        user_text = get_user_prompt(transcript)
+        user_text = get_user_prompt(transcript, ocr_text)
 
         messages = [
             {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
@@ -95,6 +147,11 @@ class MlxQwen3Describer:
             verbose=False,
         )
 
+        raw_output = self._extract_text(output)
+        return clean_text(raw_output)
+
+    def _extract_text(self, output: str | dict) -> str:
+        """Extract text from model output."""
         if isinstance(output, str):
             return output.strip()
         elif isinstance(output, dict):
@@ -150,7 +207,7 @@ class TorchQwen3Describer:
     def is_available(self) -> bool:
         return self._available
 
-    def describe(self, image_path: Path, transcript: str) -> str:
+    def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:
         if not self._available:
             return ""
 
@@ -159,7 +216,7 @@ class TorchQwen3Describer:
             return ""
 
         system_instruction = get_system_instruction()
-        user_text = get_user_prompt(transcript)
+        user_text = get_user_prompt(transcript, ocr_text)
         combined_text = f"{system_instruction}\n\n{user_text}"
 
         messages = [{
@@ -194,7 +251,8 @@ class TorchQwen3Describer:
             clean_up_tokenization_spaces=False,
         )
 
-        return output_text[0].strip() if output_text else ""
+        raw_output = output_text[0].strip() if output_text else ""
+        return clean_text(raw_output)
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:

@@ -471,6 +471,7 @@ def run_ai_descriptions(
     slide_metadata: list[tuple[int, float, float, Path]],
     transcript_segments: list[Segment],
     describer: MlxQwen3Describer | TorchQwen3Describer,
+    ocr_pipeline: OcrPipeline | None = None,
 ) -> dict[str, str]:
     """Run AI descriptions on all slides.
 
@@ -478,6 +479,7 @@ def run_ai_descriptions(
         slide_metadata: List of (index, start, end, image_path) tuples.
         transcript_segments: Transcript segments for context.
         describer: AI describer instance.
+        ocr_pipeline: OCR pipeline to extract text (optional).
 
     Returns:
         Dictionary mapping slide_id to AI description.
@@ -490,8 +492,16 @@ def run_ai_descriptions(
 
         transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
 
+        ocr_text = ""
+        if ocr_pipeline is not None:
+            try:
+                ocr_result = ocr_pipeline.process(image_path, transcript_text, [])
+                ocr_text = ocr_result.get("raw_text", "")
+            except Exception as exc:
+                logger.debug(f"OCR extraction failed for {slide_id}: {exc}")
+
         try:
-            description = describer.describe(image_path, transcript_text)
+            description = describer.describe(image_path, transcript_text, ocr_text)
             if description:
                 descriptions[slide_id] = description
                 logger.info(f"AI description {idx}/{total_slides}: {slide_id}")

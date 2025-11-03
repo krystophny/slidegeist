@@ -427,17 +427,10 @@ def _parse_model_response(response: str, fallback_text: str) -> RefinementOutput
 
 
 def build_default_ocr_pipeline() -> OcrPipeline:
-    """Create the default OCR pipeline using available components."""
+    """Create the default OCR pipeline with Tesseract only (no refinement)."""
     primary = TesseractExtractor()
-    refiner: BaseRefiner | None = None
-
-    if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() not in {"1", "true", "yes"}:
-        if platform.system() == "Darwin":
-            candidate_refiner = MlxQwenRefiner()
-            if candidate_refiner.is_available():
-                refiner = candidate_refiner
 
     if not primary.is_available:
         primary = None  # type: ignore[assignment]
 
-    return OcrPipeline(primary_extractor=primary, refiner=refiner)
+    return OcrPipeline(primary_extractor=primary, refiner=None)

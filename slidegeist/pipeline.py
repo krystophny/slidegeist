@@ -500,6 +500,7 @@ def process_video(
                     slide_metadata,
                     transcript_segments,
                     describer,
+                    ocr_pipeline,
                 )
 
                 markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
