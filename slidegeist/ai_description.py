@@ -163,13 +163,13 @@ class TorchQwen3Describer:
         system_instruction = get_system_instruction()
         user_text = get_user_prompt(transcript, ocr_text)
 
-        # Load image
+        # Load image (Qwen3-VL accepts PIL Image objects directly)
         from PIL import Image  # type: ignore[import-untyped]
         image = Image.open(image_path)
 
-        # Build messages
+        # Build messages (format: system message as string, user content as list)
         messages = [
-            {"role": "system", "content": system_instruction},
+            {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
             {
                 "role": "user",
                 "content": [
