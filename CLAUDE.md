@@ -157,10 +157,10 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 **Optional:**
 - mlx-whisper: Apple Silicon optimized Whisper
 - mlx-vlm: Apple Silicon optimized vision models (Qwen3-VL-8B-4bit)
-- torch, transformers, torchvision, accelerate: PyTorch-based Qwen3-VL-30B-AWQ for CUDA/CPU
-  - Uses QuantTrio/Qwen3-VL-30B-A3B-Instruct-AWQ (~17GB)
-  - Configured with max_memory for GPU+CPU offload (14GB GPU, rest CPU)
-  - Better quality than 8B model, fits in 16GB GPU with CPU spillover
+- torch, transformers (from GitHub main), torchvision, accelerate, autoawq: PyTorch Qwen3-VL-8B
+  - Uses Qwen/Qwen3-VL-8B-Instruct (~16GB float16)
+  - Fits in 16GB GPU
+  - Note: AWQ quantized models don't support CPU offload, so 30B AWQ won't work on 16GB GPUs
 
 **Dev:**
 - pytest, pytest-cov: Testing
