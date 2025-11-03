@@ -24,10 +24,13 @@ def clean_text(text: str) -> str:
 
 def get_system_instruction() -> str:
     return (
-        "You are an expert at analyzing presentation slides for AI-to-AI processing. "
-        "Provide structured, machine-readable descriptions that enable reconstruction "
-        "in multiple formats: LaTeX Beamer, SVG, JavaScript, Jupyter notebooks, Quarto markdown. "
-        "Focus on precision and completeness over brevity."
+        "You are an expert at analyzing academic and scientific presentation slides. "
+        "Extract ALL content with maximum precision to enable accurate reconstruction "
+        "in ANY format (PowerPoint, LaTeX Beamer, Markdown, Jupyter, Quarto, Manim). "
+        "Slides may contain BOTH handwritten AND machine-printed content. "
+        "Diagrams may need recreation as SVG, TikZ, Manim, or other vector formats. "
+        "Your structured output will be parsed programmatically by downstream tools. "
+        "Prioritize completeness and accuracy over brevity."
     )
 
 
@@ -50,34 +53,65 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Analyze this slide and generate a structured description with these sections:
+    return f"""Analyze this presentation slide and extract ALL content in a structured format.
 
-1. TOPIC: Main subject (1-3 words)
-2. TITLE: Suggested slide title
+IMPORTANT: This slide may contain BOTH handwritten and machine-printed text.
+
+Generate a complete description with these sections:
+
+1. TOPIC: Main subject (1-3 words, e.g., "Plasma Confinement", "Maxwell Equations")
+
+2. TITLE: Suggested slide title (extract from slide or infer from content)
+
 3. TEXT_CONTENT:
-   - All machine-written text (typed, printed)
-   - All handwritten text
-   - Preserve exact wording and formatting
-4. FORMULAS:
-   - Mathematical expressions in LaTeX notation
-   - Include inline and display equations
-5. VISUAL_ELEMENTS:
-   - Diagrams, flowcharts, plots, charts
-   - Describe structure for SVG/TikZ recreation
-   - Arrows, boxes, annotations with positions
-6. TABLES:
-   - Structure (rows, columns, headers)
-   - All cell contents
-7. SYMBOLS:
-   - Special symbols, icons, markers
-8. LAYOUT:
-   - Spatial arrangement
-   - Alignment, spacing, hierarchy
+   - ALL machine-printed text (typed, laser-printed)
+   - ALL handwritten text (pen, marker, chalk)
+   - Preserve EXACT wording, line breaks, and formatting
+   - Note which parts are handwritten vs. printed
+   - Include annotations, labels, and captions
 
-Context:
+4. FORMULAS:
+   - ALL mathematical/physics expressions in LaTeX notation
+   - Include inline formulas (e.g., \\( E = mc^2 \\)) and display equations
+   - Preserve equation numbering if present
+   - Include units, subscripts, superscripts
+   - Handle Greek letters, vectors, tensors, operators (∇, ∂, ∫, etc.)
+
+5. VISUAL_ELEMENTS:
+   - Diagrams: describe topology, connections, flow
+   - Plots/graphs: axes, labels, curves, data points
+   - Flowcharts: boxes, decision points, arrows
+   - Scientific diagrams: field lines, vectors, coordinate systems
+   - Describe structure precisely for recreation as SVG, TikZ, Manim, or other formats
+   - Include ALL arrows, boxes, circles, annotations with relative positions
+   - Specify colors, line styles, markers if visible
+
+6. TABLES:
+   - Full structure: number of rows, columns, headers
+   - ALL cell contents exactly as shown
+   - Alignment, borders, merged cells
+   - Units in headers if present
+
+7. SYMBOLS:
+   - Special symbols, icons, markers not covered above
+   - Greek letters in text context
+   - Mathematical operators, logic symbols
+   - Physical constants notation
+
+8. LAYOUT:
+   - Spatial arrangement (top-to-bottom, left-to-right, multi-column)
+   - Alignment, spacing, indentation
+   - Visual hierarchy (title, sections, bullet points)
+   - Relative positioning of elements
+
+Context (reference only, may contain OCR errors):
 {context}
 
-Provide complete, precise descriptions suitable for programmatic processing."""
+OUTPUT REQUIREMENTS:
+- Be EXHAUSTIVE - capture every visible element
+- Use standard notation (LaTeX for math, structured descriptions for visuals)
+- Format for downstream parsing by automated tools
+- Prioritize accuracy over brevity"""
 
 
 class MlxQwen3Describer:
