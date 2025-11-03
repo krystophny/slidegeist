@@ -52,21 +52,21 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Extract ALL content from this slide for accurate reconstruction.
+    return f"""Extract slide content for reconstruction. Output exactly 5 sections (max 3 sentences each), then write END.
 
-Output sections:
-1. TOPIC (1-3 words)
-2. TITLE (extract or infer)
-3. TEXT_CONTENT (all printed and handwritten text, exact wording)
-4. FORMULAS (LaTeX notation, all equations with units)
-5. VISUAL_ELEMENTS (diagrams, plots, graphs with spatial layout)
-6. TABLES (full structure and contents)
-7. SYMBOLS (special characters, Greek letters, operators)
-8. LAYOUT (spatial arrangement, hierarchy)
+1. TOPIC: [1-3 words only]
+
+2. TITLE: [slide title only, or "None"]
+
+3. TEXT_CONTENT: [All visible text verbatim. List main text blocks. Max 200 words.]
+
+4. FORMULAS: [All equations in LaTeX. One equation per line. Or write "None".]
+
+5. VISUAL_ELEMENTS: [Describe diagrams/plots/graphs. Max 3 sentences. Or write "None".]
 
 Context: {context}
 
-Be exhaustive. Use LaTeX for math."""
+After section 5, write END and stop."""
 
 
 class TorchQwen3Describer:
@@ -176,6 +176,14 @@ class TorchQwen3Describer:
             sys.stdout.write("\nGenerating: ")
             sys.stdout.flush()
 
+        # Create stopping criteria to prevent infinite loops
+        stop_strings = ["END", "\n\nEND", "6.", "7.", "8."]  # Stop if these appear
+        stop_token_ids = [self._processor.tokenizer.eos_token_id]
+        for stop_str in stop_strings:
+            tokens = self._processor.tokenizer.encode(stop_str, add_special_tokens=False)
+            if tokens:
+                stop_token_ids.append(tokens[-1])
+
         with self._torch.no_grad():
             output_ids = self._model.generate(
                 **inputs,
@@ -184,8 +192,9 @@ class TorchQwen3Describer:
                 top_p=self.top_p,
                 top_k=self.top_k,
                 do_sample=True,
-                repetition_penalty=1.0,
+                repetition_penalty=1.1,  # Higher to prevent repetition loops
                 streamer=streamer,
+                eos_token_id=stop_token_ids,  # Stop at EOS or "END" or section 6/7/8
             )
 
         if streamer is not None:
