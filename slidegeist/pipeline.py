@@ -6,10 +6,12 @@ from pathlib import Path
 from slidegeist.constants import (
     DEFAULT_DEVICE,
     DEFAULT_IMAGE_FORMAT,
+    DEFAULT_LLM_URL,
     DEFAULT_MIN_SCENE_LEN,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
+    DEFAULT_STT_URL,
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.export import export_slides_json
@@ -276,6 +278,8 @@ def process_video(
     ocr_pipeline: OcrPipeline | None = None,
     retry_failed: bool = False,
     force_redo_ai: bool = False,
+    stt_url: str = DEFAULT_STT_URL,
+    llm_url: str = DEFAULT_LLM_URL,
 ) -> dict[str, Path | list[Path]]:
     """Process a video and return generated artifacts.
 
@@ -403,14 +407,16 @@ def process_video(
         logger.info("=" * 60)
 
         try:
-            transcript_data = transcribe_video(video_path, model_size=model, device=device)
+            transcript_data = transcribe_video(
+                video_path, model_size=model, device=device, stt_url=stt_url
+            )
             transcript_segments = transcript_data["segments"]
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Install openai-whisper: pip install openai-whisper\n"
-            error_msg += "2. For MLX (Apple Silicon): pip install mlx-whisper\n"
-            error_msg += "3. For CUDA: Install PyTorch with CUDA support first\n"
+            error_msg += f"1. Start voxtype STT service at {stt_url}\n"
+            error_msg += "2. Run: scripts/setup-voxtype-stt.sh\n"
+            error_msg += "3. Or see README for voxtype installation\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)
             # Continue without transcription
@@ -479,20 +485,6 @@ def process_video(
     needs_ai = has_slides and not completed_stages["ai_description"]
 
     if needs_ai and not should_skip_ai:
-        # Free GPU memory before loading vision model
-        logger.info("Freeing GPU memory before AI descriptions...")
-        try:
-            import gc
-            import torch  # type: ignore[import-untyped]
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.info("GPU memory cleared")
-        except ImportError:
-            pass  # PyTorch not installed, skip cleanup
-        except Exception as e:
-            logger.debug(f"GPU cleanup warning: {e}")
-
         logger.info("=" * 60)
         logger.info("STEP 5: AI Slide Descriptions")
         logger.info("=" * 60)
@@ -501,12 +493,12 @@ def process_video(
             from slidegeist.ai_description import build_ai_describer
             from slidegeist.export import run_ai_descriptions
 
-            describer = build_ai_describer()
+            describer = build_ai_describer(llm_url=llm_url)
             if describer is None:
                 error_msg = "AI describer not available\n\nTo fix:\n"
-                error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
-                error_msg += "2. For PyTorch: pip install torch transformers\n"
-                error_msg += "3. Install Qwen3-VL model (will download on first run)\n"
+                error_msg += f"1. Start llama.cpp server at {llm_url}\n"
+                error_msg += "2. Run: scripts/setup-local-llm.sh\n"
+                error_msg += "3. Or see README for llama.cpp installation\n"
                 logger.error(error_msg)
                 mark_stage_failed(output_dir, "ai_description", error_msg)
             else:
@@ -537,9 +529,9 @@ def process_video(
 
         except Exception as exc:
             error_msg = f"AI description failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
-            error_msg += "2. For PyTorch CUDA: pip install torch transformers torchvision\n"
-            error_msg += "3. For PyTorch CPU: pip install torch transformers torchvision\n"
+            error_msg += f"1. Start llama.cpp server at {llm_url}\n"
+            error_msg += "2. Run: scripts/setup-local-llm.sh\n"
+            error_msg += "3. Or see README for llama.cpp installation\n"
             logger.error("=" * 60)
             logger.error("AI DESCRIPTION FAILED")
             logger.error("=" * 60)

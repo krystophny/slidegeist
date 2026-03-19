@@ -1,76 +1,15 @@
-"""Audio transcription using OpenAI Whisper (PyTorch backend)."""
+"""Audio transcription via Voxtype STT service (OpenAI-compatible API)."""
 
+import json
 import logging
-import platform
 import time
 from pathlib import Path
 from typing import TypedDict
+from urllib.request import Request, urlopen
 
-from slidegeist.constants import (
-    COMPRESSION_RATIO_THRESHOLD,
-    DEFAULT_DEVICE,
-    DEFAULT_WHISPER_MODEL,
-    LOG_PROB_THRESHOLD,
-    NO_SPEECH_THRESHOLD,
-)
+from slidegeist.constants import DEFAULT_DEVICE, DEFAULT_STT_URL, DEFAULT_WHISPER_MODEL
 
 logger = logging.getLogger(__name__)
-
-
-def is_mlx_available() -> bool:
-    """Check if MLX is available (Apple Silicon Mac).
-
-    Returns:
-        True if running on Apple Silicon with MLX support, False otherwise.
-    """
-    # Allow user to completely disable MLX if it causes hard crashes
-    import os
-    if os.getenv("SLIDEGEIST_DISABLE_MLX", "").lower() in {"1", "true", "yes"}:
-        logger.info("MLX disabled via SLIDEGEIST_DISABLE_MLX environment variable")
-        return False
-
-    # Check if we're on macOS ARM64 (Apple Silicon)
-    if platform.system() != "Darwin":
-        return False
-    if platform.machine() != "arm64":
-        return False
-
-    # Check if mlx-whisper is importable without actually importing it
-    # NOTE: Even find_spec() can trigger hard crashes if MLX C++ bindings are corrupted
-    # If experiencing hard crashes (macOS crash dialog), set SLIDEGEIST_DISABLE_MLX=1
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec("mlx_whisper")
-        if spec is None:
-            return False
-
-        # Additional safety: check if we can at least import the package
-        # This is still risky but necessary for validation
-        logger.debug("MLX package found, attempting validation import")
-        return True
-    except (ImportError, ValueError, AttributeError):
-        return False
-    except Exception as e:
-        # Catch any other errors including potential crashes during spec lookup
-        logger.warning(f"MLX detection failed: {e}")
-        return False
-
-
-def is_cuda_available() -> bool:
-    """Check if CUDA GPU is available for PyTorch.
-
-    Returns:
-        True if CUDA GPU is available and working, False otherwise.
-    """
-    try:
-        import torch  # type: ignore[import-untyped]
-
-        return torch.cuda.is_available()
-    except (ImportError, AttributeError, RuntimeError):
-        # ImportError: torch not installed
-        # AttributeError: torch.cuda not available
-        # RuntimeError: CUDA initialization failed
-        return False
 
 
 class Word(TypedDict):
@@ -97,224 +36,189 @@ class TranscriptResult(TypedDict):
     segments: list[Segment]
 
 
+def _build_multipart(
+    fields: dict[str, str],
+    file_field: str,
+    file_path: Path,
+    file_content_type: str = "audio/wav",
+) -> tuple[bytes, str]:
+    """Build multipart/form-data body for urllib.
+
+    Args:
+        fields: Simple key-value form fields.
+        file_field: Name of the file field.
+        file_path: Path to the file to upload.
+        file_content_type: MIME type for the file.
+
+    Returns:
+        Tuple of (body_bytes, content_type_header).
+    """
+    boundary = "----SlidegeistBoundary9876543210"
+    parts: list[bytes] = []
+
+    for key, value in fields.items():
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
+        parts.append(f"{value}\r\n".encode())
+
+    parts.append(f"--{boundary}\r\n".encode())
+    parts.append(
+        f'Content-Disposition: form-data; name="{file_field}"; '
+        f'filename="{file_path.name}"\r\n'.encode()
+    )
+    parts.append(f"Content-Type: {file_content_type}\r\n\r\n".encode())
+    parts.append(file_path.read_bytes())
+    parts.append(b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+
+    body = b"".join(parts)
+    content_type = f"multipart/form-data; boundary={boundary}"
+    return body, content_type
+
+
+def _is_service_available(stt_url: str) -> bool:
+    """Check if the STT service is reachable."""
+    try:
+        req = Request(f"{stt_url}/v1/models", method="GET")
+        with urlopen(req, timeout=2):
+            return True
+    except Exception:
+        # Try health endpoint as fallback
+        try:
+            req = Request(f"{stt_url}/health", method="GET")
+            with urlopen(req, timeout=2):
+                return True
+        except Exception:
+            return False
+
+
+def _transcribe_via_service(
+    audio_path: Path,
+    stt_url: str,
+    model: str,
+    language: str | None = None,
+) -> TranscriptResult:
+    """Transcribe audio via Voxtype OpenAI-compatible STT API.
+
+    Args:
+        audio_path: Path to audio file (WAV format).
+        stt_url: Base URL of the STT service.
+        model: Whisper model name.
+        language: Language code (e.g., 'en', 'de') or None for auto-detection.
+
+    Returns:
+        TranscriptResult with segments and detected language.
+    """
+    fields: dict[str, str] = {
+        "model": model,
+        "response_format": "verbose_json",
+        "timestamp_granularities[]": "word",
+    }
+    if language:
+        fields["language"] = language
+
+    body, content_type = _build_multipart(fields, "file", audio_path)
+
+    url = f"{stt_url}/v1/audio/transcriptions"
+    req = Request(url, data=body, method="POST")
+    req.add_header("Content-Type", content_type)
+
+    logger.info(f"Sending audio to STT service at {url}")
+    start_time = time.time()
+
+    with urlopen(req, timeout=7200) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+
+    elapsed = time.time() - start_time
+    logger.info(f"STT service responded in {elapsed:.1f}s")
+
+    segments_list: list[Segment] = []
+    detected_language = result.get("language", "unknown")
+
+    for seg in result.get("segments", []):
+        words_list: list[Word] = []
+        for word in seg.get("words", []):
+            words_list.append({
+                "word": word.get("word", ""),
+                "start": float(word.get("start", 0.0)),
+                "end": float(word.get("end", 0.0)),
+            })
+        segments_list.append({
+            "start": float(seg.get("start", 0.0)),
+            "end": float(seg.get("end", 0.0)),
+            "text": seg.get("text", "").strip(),
+            "words": words_list,
+        })
+
+    # If no segments from API, try top-level words
+    if not segments_list and result.get("words"):
+        all_words: list[Word] = []
+        for word in result["words"]:
+            all_words.append({
+                "word": word.get("word", ""),
+                "start": float(word.get("start", 0.0)),
+                "end": float(word.get("end", 0.0)),
+            })
+        if all_words:
+            full_text = result.get("text", " ".join(w["word"] for w in all_words)).strip()
+            segments_list.append({
+                "start": all_words[0]["start"],
+                "end": all_words[-1]["end"],
+                "text": full_text,
+                "words": all_words,
+            })
+
+    logger.info(f"Transcription complete: {len(segments_list)} segments, language={detected_language}")
+    return {"language": detected_language, "segments": segments_list}
+
+
 def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
     device: str = DEFAULT_DEVICE,
     compute_type: str = "int8",
+    stt_url: str = DEFAULT_STT_URL,
 ) -> TranscriptResult:
-    """Transcribe video audio using OpenAI Whisper (PyTorch backend).
+    """Transcribe video audio using the Voxtype STT service.
+
+    Extracts audio from the video, then sends it to the STT service.
+    The service must be running (see scripts/setup-voxtype-stt.sh).
 
     Args:
         video_path: Path to the video file.
-        model_size: Whisper model size: tiny, base, small, medium, large-v3, large-v2, large.
-        device: Device to use: 'cpu', 'cuda', or 'auto' (auto-detects MLX on Apple Silicon).
-        compute_type: Computation type (unused, kept for API compatibility).
+        model_size: Whisper model name (default: large-v3-turbo).
+        device: Unused, kept for API compatibility.
+        compute_type: Unused, kept for API compatibility.
+        stt_url: Base URL of the Voxtype STT service.
 
     Returns:
         Dictionary with language and segments containing timestamped text.
 
     Raises:
-        ImportError: If openai-whisper is not installed.
-        Exception: If transcription fails.
+        FileNotFoundError: If video file does not exist.
+        ConnectionError: If STT service is not reachable.
     """
-
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
-    # Auto-detect best available device
-    use_mlx = False
-    if device == "auto":
-        if is_mlx_available():
-            use_mlx = True
-            device = "cpu"  # MLX uses its own backend
-            logger.info("MLX detected - using MLX-optimized Whisper for Apple Silicon")
-        elif is_cuda_available():
-            device = "cuda"
-            logger.info("CUDA GPU detected - using GPU acceleration")
-        elif platform.system() == "Darwin" and platform.machine() == "arm64":
-            device = "cpu"
-            logger.info(
-                "Apple Silicon detected but MLX not available, using CPU. Install with: pip install mlx-whisper"
-            )
-        else:
-            device = "cpu"
-            logger.info("Auto-detected device: CPU")
-
-    # Use MLX-optimized transcription if available
-    if use_mlx:
-        try:
-            import mlx_whisper  # type: ignore[import-untyped, import-not-found]
-
-            # Suppress MLX verbose debug output (only after successful import)
-            try:
-                logging.getLogger("mlx").setLevel(logging.WARNING)
-                logging.getLogger("mlx_whisper").setLevel(logging.WARNING)
-            except Exception:
-                pass  # Ignore logger configuration errors
-
-            # Map faster-whisper model names to MLX model names
-            mlx_model_map = {
-                "large-v3": "mlx-community/whisper-large-v3-mlx",
-                "large-v2": "mlx-community/whisper-large-v2-mlx",
-                "large": "mlx-community/whisper-large-v2-mlx",
-                "medium": "mlx-community/whisper-medium-mlx",
-                "small": "mlx-community/whisper-small-mlx",
-                "base": "mlx-community/whisper-base-mlx",
-                "tiny": "mlx-community/whisper-tiny-mlx",
-            }
-            mlx_model = mlx_model_map.get(model_size, f"mlx-community/whisper-{model_size}-mlx")
-
-            logger.info(f"Loading MLX Whisper model: {mlx_model}")
-            result = mlx_whisper.transcribe(
-                str(video_path),
-                path_or_hf_repo=mlx_model,
-                word_timestamps=True,
-            )
-            # Convert MLX result to our format
-            mlx_segments: list[Segment] = []
-            for segment in result.get("segments", []):
-                mlx_words: list[Word] = []
-                for word in segment.get("words", []):
-                    mlx_words.append(
-                        {"word": word["word"], "start": word["start"], "end": word["end"]}
-                    )
-                mlx_segments.append(
-                    {
-                        "start": segment["start"],
-                        "end": segment["end"],
-                        "text": segment["text"].strip(),
-                        "words": mlx_words,
-                    }
-                )
-            logger.info(f"MLX transcription complete: {len(mlx_segments)} segments")
-            return {"language": result.get("language", "unknown"), "segments": mlx_segments}
-        except ImportError as e:
-            logger.warning(f"MLX import failed: {e}, falling back to openai-whisper")
-            use_mlx = False
-        except (KeyError, AttributeError, TypeError) as e:
-            logger.warning(f"MLX data format error: {e}, falling back to openai-whisper")
-            use_mlx = False
-        except Exception as e:
-            logger.error(f"MLX transcription crashed: {e}, falling back to openai-whisper")
-            logger.debug("Full traceback:", exc_info=True)
-            use_mlx = False
-
-    # Load OpenAI Whisper model (PyTorch backend)
-    import whisper  # type: ignore[import-untyped]
-
-    logger.info(f"Loading Whisper model: {model_size} on {device}")
-    model = whisper.load_model(model_size, device=device)
-
-    # Get video duration for progress tracking
-    from slidegeist.ffmpeg import get_video_duration
-
-    try:
-        video_duration = get_video_duration(video_path)
-        logger.info(
-            f"Video duration: {video_duration / 60:.1f} minutes ({video_duration:.1f} seconds)"
-        )
-    except Exception:
-        video_duration = None
-        logger.warning("Could not determine video duration, progress tracking will be limited")
-
-    logger.info(f"Transcribing: {video_path.name}")
-    start_time = time.time()
-
-    # Transcribe with OpenAI Whisper with progress bar
-    from tqdm import tqdm
-
-    # OpenAI Whisper doesn't have built-in progress callbacks, so we use verbose output
-    # and wrap it with tqdm to show progress based on printed segments
-    import io
-    import contextlib
-
-    if video_duration and video_duration > 0:
-        # Show progress bar based on estimated duration
-        pbar = tqdm(total=int(video_duration), unit="s", desc="Transcribing", ncols=100)
-
-        # Capture verbose output to update progress
-        class ProgressCapture:
-            def __init__(self, pbar, start_time):
-                self.pbar = pbar
-                self.start_time = start_time
-                self.last_position = 0
-
-            def write(self, text):
-                # Parse progress from Whisper's output (shows timestamps)
-                import re
-                # Look for timestamp patterns like [00:01.000 --> 00:05.000]
-                match = re.search(r'\[(\d+):(\d+)\.(\d+) --> (\d+):(\d+)\.(\d+)\]', text)
-                if match:
-                    # Calculate end time in seconds
-                    end_min, end_sec = int(match.group(4)), int(match.group(5))
-                    position = end_min * 60 + end_sec
-                    if position > self.last_position:
-                        self.pbar.update(position - self.last_position)
-                        self.last_position = position
-
-            def flush(self):
-                pass
-
-        progress_capture = ProgressCapture(pbar, start_time)
-
-        # Redirect stderr to capture Whisper's verbose output
-        import sys
-        old_stderr = sys.stderr
-        sys.stderr = progress_capture
-
-        try:
-            result = model.transcribe(
-                str(video_path),
-                word_timestamps=True,
-                compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
-                logprob_threshold=LOG_PROB_THRESHOLD,
-                no_speech_threshold=NO_SPEECH_THRESHOLD,
-                verbose=True,
-            )
-        finally:
-            sys.stderr = old_stderr
-            pbar.close()
-    else:
-        # No duration info, just show indeterminate progress
-        result = model.transcribe(
-            str(video_path),
-            word_timestamps=True,
-            compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
-            logprob_threshold=LOG_PROB_THRESHOLD,
-            no_speech_threshold=NO_SPEECH_THRESHOLD,
-            verbose=False,
+    # Check service availability
+    if not _is_service_available(stt_url):
+        raise ConnectionError(
+            f"STT service not available at {stt_url}\n"
+            f"Start the service with: scripts/setup-voxtype-stt.sh\n"
+            f"Or install voxtype and run:\n"
+            f"  voxtype --service --service-host 127.0.0.1 --service-port 8427 "
+            f"--model {model_size} daemon"
         )
 
-    # Extract segments
-    segments_list: list[Segment] = []
-    for segment in result["segments"]:
-        words_list: list[Word] = []
-        if "words" in segment:
-            for word in segment["words"]:
-                words_list.append({"word": word["word"], "start": word["start"], "end": word["end"]})
+    # Extract audio to a temporary WAV file
+    import tempfile
 
-        segments_list.append(
-            {
-                "start": segment["start"],
-                "end": segment["end"],
-                "text": segment["text"].strip(),
-                "words": words_list,
-            }
-        )
+    from slidegeist.ffmpeg import extract_audio
 
-    detected_language = result.get("language", "unknown")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        audio_path = Path(tmp_dir) / "audio.wav"
+        logger.info(f"Extracting audio from {video_path.name}")
+        extract_audio(video_path, audio_path)
 
-    # Show completion stats
-    total_time = time.time() - start_time
-    if video_duration and video_duration > 0:
-        speed_factor = video_duration / total_time
-        logger.info(
-            f"Transcription complete: {len(segments_list)} segments in {total_time/60:.1f}min "
-            f"({speed_factor:.2f}x realtime)"
-        )
-    else:
-        logger.info(f"Transcription complete: {len(segments_list)} segments in {total_time/60:.1f}min")
-
-    return {"language": detected_language, "segments": segments_list}
-
+        return _transcribe_via_service(audio_path, stt_url, model_size)

@@ -9,10 +9,12 @@ from slidegeist import __version__
 from slidegeist.constants import (
     DEFAULT_DEVICE,
     DEFAULT_IMAGE_FORMAT,
+    DEFAULT_LLM_URL,
     DEFAULT_MIN_SCENE_LEN,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
+    DEFAULT_STT_URL,
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
@@ -140,7 +142,9 @@ def handle_process(args: argparse.Namespace) -> None:
             image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
             split_slides=getattr(args, 'split', False),
             retry_failed=getattr(args, 'retry_failed', False),
-            force_redo_ai=getattr(args, 'force_redo_ai', False)
+            force_redo_ai=getattr(args, 'force_redo_ai', False),
+            stt_url=getattr(args, 'stt_url', DEFAULT_STT_URL),
+            llm_url=getattr(args, 'llm_url', DEFAULT_LLM_URL),
         )
 
         print("\n" + "=" * 60)
@@ -306,14 +310,24 @@ Examples:
     process_parser.add_argument(
         "--model",
         default=DEFAULT_WHISPER_MODEL,
-        choices=["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"],
-        help=f"Whisper model size (default: {DEFAULT_WHISPER_MODEL})"
+        help=f"Whisper model name (default: {DEFAULT_WHISPER_MODEL})"
     )
     process_parser.add_argument(
         "--device",
         default=DEFAULT_DEVICE,
-        choices=["cpu", "cuda", "auto"],
-        help=f"Processing device (default: {DEFAULT_DEVICE} - uses MLX on Apple Silicon if available)"
+        help=f"Processing device (default: {DEFAULT_DEVICE})"
+    )
+    process_parser.add_argument(
+        "--stt-url",
+        default=DEFAULT_STT_URL,
+        metavar="URL",
+        help=f"Voxtype STT service URL (default: {DEFAULT_STT_URL})"
+    )
+    process_parser.add_argument(
+        "--llm-url",
+        default=DEFAULT_LLM_URL,
+        metavar="URL",
+        help=f"llama.cpp LLM service URL (default: {DEFAULT_LLM_URL})"
     )
     process_parser.add_argument(
         "--split",

@@ -7,8 +7,8 @@ allow-direct-references = true
 
 [project]
 name = "slidegeist"
-version = "2025.11.3"
-description = "Extract slides and transcripts from lecture videos with minimal dependencies"
+version = "2025.11.4"
+description = "Extract slides and transcripts from lecture videos using external STT and VLM services"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -35,12 +35,6 @@ dependencies = [
     "Pillow>=11.0.0,<12.0",
     "tqdm>=4.67.0,<5.0",
     "psutil>=7.0.0,<8.0",
-    "openai-whisper>=20231117",  # PyTorch backend, works with any CUDA version
-    "torch>=2.0.0,<3.0",  # Required for Whisper and Qwen3-VL
-    "transformers>=4.30.0,<5.0",  # Required for Qwen3-VL
-    "torchvision>=0.15.0,<1.0",  # Required for Qwen3-VL image processing
-    "accelerate>=0.20.0,<2.0",  # Required for efficient GPU loading
-    "bitsandbytes>=0.40.0,<1.0",  # Required for 8-bit quantization of Qwen3-VL
 ]
 
 [project.optional-dependencies]
@@ -49,9 +43,6 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
-]
-mlx = [
-    "mlx-whisper>=0.4.0",  # Apple Silicon optimized Whisper
 ]
 
 [project.scripts]

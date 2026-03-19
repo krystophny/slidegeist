@@ -4,32 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Slidegeist extracts slides and timestamped transcripts from lecture videos using FFmpeg scene detection and Whisper transcription. The project emphasizes minimal dependencies, research-based methods, and platform-optimized performance (MLX on Apple Silicon).
+Slidegeist extracts slides and timestamped transcripts from lecture videos using FFmpeg scene detection and external services for transcription (Voxtype STT) and AI slide descriptions (llama.cpp with Qwen3.5). The project emphasizes minimal dependencies and service-based architecture.
 
 ## Build, Test, and Lint Commands
 
 ### Development Setup
 ```bash
-pip install -e ".[dev]"          # Install in editable mode with dev dependencies
-pip install -e ".[mlx]"          # Add MLX support for Apple Silicon
+uv pip install -e ".[dev]"       # Install in editable mode with dev dependencies
+```
+
+### Services Setup
+```bash
+scripts/setup-voxtype-stt.sh     # Start Voxtype STT service (port 8427)
+scripts/setup-local-llm.sh       # Start llama.cpp with Qwen3.5-9B (port 8081)
 ```
 
 ### Testing
 ```bash
-pytest                           # Run all tests (excludes manual tests)
-pytest -v                        # Verbose output
-pytest tests/test_export.py      # Run specific test file
-pytest -m "not slow"             # Skip slow tests
-pytest --cov=slidegeist --cov-report=html  # Coverage report
+uv run pytest                    # Run all tests (excludes manual tests)
+uv run pytest -v                 # Verbose output
+uv run pytest tests/test_export.py  # Run specific test file
+uv run pytest -m "not slow"     # Skip slow tests
 ```
 
 ### Code Quality
 ```bash
-ruff check slidegeist/           # Run linter
-ruff check --fix slidegeist/     # Auto-fix linting issues
-ruff format slidegeist/          # Auto-format code
-mypy slidegeist/                 # Type check entire package
-mypy slidegeist/file.py --strict # Strict type checking on single file
+uv run ruff check slidegeist/    # Run linter
+uv run ruff check --fix slidegeist/  # Auto-fix linting issues
+uv run ruff format slidegeist/   # Auto-format code
 ```
 
 ### Running the CLI
@@ -37,17 +39,33 @@ mypy slidegeist/file.py --strict # Strict type checking on single file
 slidegeist video.mp4                        # Process video (default: slides + transcript)
 slidegeist video.mp4 --out output/          # Specify output directory
 slidegeist video.mp4 --scene-threshold 0.02 # Adjust scene detection sensitivity
-slidegeist video.mp4 --model base           # Use faster Whisper model
+slidegeist video.mp4 --model large-v3-turbo # Whisper model name
+slidegeist video.mp4 --stt-url http://host:8427  # Custom STT service URL
+slidegeist video.mp4 --llm-url http://host:8081  # Custom LLM service URL
 slidegeist slides video.mp4                 # Extract only slides (no transcription)
 ```
 
 ## Architecture
 
+### Service-Based Design
+
+Slidegeist uses external services for heavy ML workloads instead of bundling models:
+
+- **Voxtype STT** (port 8427): OpenAI-compatible speech-to-text API using whisper-rs
+  - Endpoint: `POST /v1/audio/transcriptions`
+  - Default model: large-v3-turbo
+  - Requires branch `feature/single-daemon-openai-stt-api` of voxtype
+
+- **llama.cpp** (port 8081): OpenAI-compatible LLM/VLM API
+  - Endpoint: `POST /v1/chat/completions`
+  - Default model: Qwen3.5-9B (Q4_K_M quantization)
+  - Supports vision via base64 image URLs
+
 ### Processing Pipeline (pipeline.py)
 
 The main `process_video()` function orchestrates processing with smart resume capabilities:
 
-**Smart Resume**: If output directory contains both a video file and a slides subdirectory with images, automatically skips slide extraction and resumes from transcription. This enables re-running slidegeist with the same URL to add transcription to existing slides.
+**Smart Resume**: If output directory contains both a video file and a slides subdirectory with images, automatically skips slide extraction and resumes from transcription.
 
 **Processing Steps**:
 
@@ -60,25 +78,27 @@ The main `process_video()` function orchestrates processing with smart resume ca
    - Simple numbered filenames: slide_001.jpg, slide_002.jpg, etc.
    - Supports JPG and PNG formats
 
-3. **Transcription** (transcribe.py): Uses Whisper for speech-to-text with word-level timestamps
-   - Auto-detects MLX on Apple Silicon for 2-3x speedup
-   - Falls back to faster-whisper on other platforms
-   - VAD (Voice Activity Detection) filtering enabled by default
+3. **Transcription** (transcribe.py): Sends audio to Voxtype STT service
+   - Extracts audio via FFmpeg, sends WAV to OpenAI-compatible API
+   - Returns word-level timestamps and segments
 
-4. **OCR** (ocr.py): Optional Tesseract OCR with Qwen3-VL vision model refinement
-   - Two-stage pipeline: fast Tesseract baseline, then optional MLX-based enhancement
-   - Qwen3-VL only available on Apple Silicon with MLX
+4. **OCR** (ocr.py): Optional Tesseract OCR for text extraction
+   - Uses pytesseract with English+German language support
 
-5. **Export** (export.py): Generates Markdown files with YAML front matter
+5. **AI Descriptions** (ai_description.py): Vision-language slide analysis via llama.cpp
+   - Sends slide images as base64 to the LLM server
+   - Generates structured 5-section descriptions for reconstruction
+
+6. **Export** (export.py): Generates Markdown files with YAML front matter
    - Default: Single `slides.md` with table of contents (LLM-friendly)
    - Split mode (`--split`): Separate files per slide with `index.md`
 
 ### Key Design Decisions
 
 - **Opencast compatibility**: Scene detection threshold and optimization mirror Opencast's VideoSegmenterService implementation
-- **Platform optimization**: MLX auto-detection for Apple Silicon; faster-whisper for other platforms
+- **Service architecture**: No bundled ML models, uses external llama.cpp and voxtype services
+- **Minimal dependencies**: Core package needs only FFmpeg, opencv-python, pytesseract, Pillow
 - **Research-based defaults**: Scene threshold (0.025), target segments/hour (30), minimum segment length (2s) are based on Opencast research
-- **Minimal dependencies**: Core functionality works with just FFmpeg, faster-whisper, opencv-python, and pytesseract
 
 ### Scene Detection Implementation
 
@@ -93,16 +113,6 @@ Two complementary implementations exist:
    - Supports multiple methods: SAD, z-score (rolling window), histogram
    - Used by `scripts/plot_threshold_sweep.py` for research and tuning
    - Not used in main CLI pipeline
-
-### Device and Model Selection
-
-- Device selection logic in transcribe.py:
-  - `auto`: Auto-detects best device in priority order: MLX (Apple Silicon) → CUDA (NVIDIA GPU) → CPU
-  - `cuda`: Explicit NVIDIA GPU usage (requires PyTorch with CUDA installed)
-  - `cpu`: Explicit CPU usage
-- Whisper models: tiny, base, small, medium, large-v2, large-v3 (default)
-- Compute type auto-adjusted: `int8` for CPU, `float16` for CUDA
-- CUDA detection uses `torch.cuda.is_available()` when PyTorch is installed
 
 ## Testing Strategy
 
@@ -135,8 +145,9 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 - `DEFAULT_MIN_SCENE_LEN = 2.0`: Minimum segment duration (seconds)
 - `DEFAULT_START_OFFSET = 3.0`: Skip first N seconds to avoid setup noise
 - `DEFAULT_SEGMENTS_PER_HOUR = 30`: Opencast optimizer target
-- `DEFAULT_WHISPER_MODEL = "large-v3"`: Best accuracy model
-- `DEFAULT_DEVICE = "auto"`: Auto-detect MLX or CPU
+- `DEFAULT_WHISPER_MODEL = "large-v3-turbo"`: Default Whisper model
+- `DEFAULT_STT_URL = "http://127.0.0.1:8427"`: Voxtype STT service
+- `DEFAULT_LLM_URL = "http://127.0.0.1:8081"`: llama.cpp server
 
 ## Code Style Requirements
 
@@ -147,20 +158,18 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 
 ## Dependencies
 
-**Core:**
-- faster-whisper: Whisper inference engine (CTranslate2 backend)
+**Core (lightweight):**
+- numpy: Array operations
 - opencv-python: Video frame extraction
-- pytesseract: OCR
+- pytesseract: OCR (optional, degrades gracefully)
 - yt-dlp: Video download from URLs
+- Pillow: Image processing
 - tqdm: Progress bars
+- psutil: System resource detection
 
-**Optional:**
-- mlx-whisper: Apple Silicon optimized Whisper
-- mlx-vlm: Apple Silicon optimized vision models (Qwen3-VL-8B-4bit)
-- torch, transformers (from GitHub main), torchvision, accelerate, autoawq: PyTorch Qwen3-VL-8B
-  - Uses Qwen/Qwen3-VL-8B-Instruct (~16GB float16)
-  - Fits in 16GB GPU
-  - Note: AWQ quantized models don't support CPU offload, so 30B AWQ won't work on 16GB GPUs
+**External Services (not Python dependencies):**
+- Voxtype STT: whisper-rs based transcription daemon
+- llama.cpp: LLM/VLM server with Qwen3.5-9B
 
 **Dev:**
 - pytest, pytest-cov: Testing

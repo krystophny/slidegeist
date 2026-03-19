@@ -16,13 +16,12 @@ DEFAULT_MAX_ERROR = 0.25     # Maximum error tolerance (25%, Opencast default)
 DEFAULT_MAX_CYCLES = 3       # Maximum optimization iterations (Opencast default)
 
 # Whisper transcription
-DEFAULT_WHISPER_MODEL = "large-v3"  # Best accuracy
-DEFAULT_DEVICE = "auto"  # Auto-detect MLX on Apple Silicon, else CPU
+DEFAULT_WHISPER_MODEL = "large-v3-turbo"  # Fast and accurate (voxtype default)
+DEFAULT_DEVICE = "auto"  # Auto-detect: service first, then MLX, then CPU
 
-# Transcription quality thresholds
-COMPRESSION_RATIO_THRESHOLD = 2.4  # Prevent hanging on compression issues
-LOG_PROB_THRESHOLD = -1.0  # Less strict filtering for better results
-NO_SPEECH_THRESHOLD = 0.6  # Default whisper value
+# Service URLs (OpenAI-compatible endpoints)
+DEFAULT_STT_URL = "http://127.0.0.1:8427"   # Voxtype STT service
+DEFAULT_LLM_URL = "http://127.0.0.1:8081"   # llama.cpp server (Qwen3.5-9B)
 
 # Output formats
 DEFAULT_IMAGE_FORMAT = "jpg"

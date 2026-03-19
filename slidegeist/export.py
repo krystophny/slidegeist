@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from slidegeist.ai_description import TorchQwen3Describer
+from slidegeist.ai_description import LlamaCppDescriber
 from slidegeist.ocr import OcrPipeline
 from slidegeist.transcribe import Segment
 
@@ -481,7 +481,7 @@ def _build_combined_markdown(
 def run_ai_descriptions(
     slide_metadata: list[tuple[int, float, float, Path]],
     transcript_segments: list[Segment],
-    describer: TorchQwen3Describer,
+    describer: LlamaCppDescriber,
     ocr_pipeline: OcrPipeline | None = None,
     output_path: Path | None = None,
     force_redo: bool = False,
