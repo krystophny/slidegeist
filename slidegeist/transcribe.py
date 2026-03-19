@@ -2,14 +2,20 @@
 
 import json
 import logging
+import socket
 import time
 from pathlib import Path
 from typing import TypedDict
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from slidegeist.constants import DEFAULT_DEVICE, DEFAULT_STT_URL, DEFAULT_WHISPER_MODEL
 
 logger = logging.getLogger(__name__)
+
+# Chunk duration in seconds for splitting long audio files.
+# Voxtype has an HTTP body size limit, so we split audio into manageable pieces.
+CHUNK_DURATION_SECS = 300  # 5 minutes
 
 
 class Word(TypedDict):
@@ -77,45 +83,36 @@ def _build_multipart(
 
 
 def _is_service_available(stt_url: str) -> bool:
-    """Check if the STT service is reachable."""
+    """Check if the STT service is reachable by attempting a TCP connection."""
+    parsed = urlparse(stt_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
     try:
-        req = Request(f"{stt_url}/v1/models", method="GET")
-        with urlopen(req, timeout=2):
+        with socket.create_connection((host, port), timeout=2):
             return True
-    except Exception:
-        # Try health endpoint as fallback
-        try:
-            req = Request(f"{stt_url}/health", method="GET")
-            with urlopen(req, timeout=2):
-                return True
-        except Exception:
-            return False
+    except (OSError, TimeoutError):
+        return False
 
 
-def _transcribe_via_service(
+def _transcribe_chunk(
     audio_path: Path,
     stt_url: str,
     model: str,
-    language: str | None = None,
-) -> TranscriptResult:
-    """Transcribe audio via Voxtype OpenAI-compatible STT API.
+) -> str:
+    """Transcribe a single audio chunk via the STT API.
 
     Args:
         audio_path: Path to audio file (WAV format).
         stt_url: Base URL of the STT service.
         model: Whisper model name.
-        language: Language code (e.g., 'en', 'de') or None for auto-detection.
 
     Returns:
-        TranscriptResult with segments and detected language.
+        Transcribed text string.
     """
     fields: dict[str, str] = {
         "model": model,
         "response_format": "verbose_json",
-        "timestamp_granularities[]": "word",
     }
-    if language:
-        fields["language"] = language
 
     body, content_type = _build_multipart(fields, "file", audio_path)
 
@@ -123,53 +120,55 @@ def _transcribe_via_service(
     req = Request(url, data=body, method="POST")
     req.add_header("Content-Type", content_type)
 
-    logger.info(f"Sending audio to STT service at {url}")
-    start_time = time.time()
-
-    with urlopen(req, timeout=7200) as resp:
+    with urlopen(req, timeout=3600) as resp:
         result = json.loads(resp.read().decode("utf-8"))
 
-    elapsed = time.time() - start_time
-    logger.info(f"STT service responded in {elapsed:.1f}s")
+    # Handle both verbose_json (with segments) and plain json (text only)
+    if "segments" in result and result["segments"]:
+        return result
+    return result.get("text", "")
 
-    segments_list: list[Segment] = []
-    detected_language = result.get("language", "unknown")
 
-    for seg in result.get("segments", []):
-        words_list: list[Word] = []
-        for word in seg.get("words", []):
-            words_list.append({
-                "word": word.get("word", ""),
-                "start": float(word.get("start", 0.0)),
-                "end": float(word.get("end", 0.0)),
-            })
-        segments_list.append({
-            "start": float(seg.get("start", 0.0)),
-            "end": float(seg.get("end", 0.0)),
-            "text": seg.get("text", "").strip(),
-            "words": words_list,
-        })
+def _split_audio_into_chunks(
+    audio_path: Path,
+    chunk_dir: Path,
+    chunk_duration: int = CHUNK_DURATION_SECS,
+) -> list[tuple[Path, float]]:
+    """Split audio file into chunks using FFmpeg.
 
-    # If no segments from API, try top-level words
-    if not segments_list and result.get("words"):
-        all_words: list[Word] = []
-        for word in result["words"]:
-            all_words.append({
-                "word": word.get("word", ""),
-                "start": float(word.get("start", 0.0)),
-                "end": float(word.get("end", 0.0)),
-            })
-        if all_words:
-            full_text = result.get("text", " ".join(w["word"] for w in all_words)).strip()
-            segments_list.append({
-                "start": all_words[0]["start"],
-                "end": all_words[-1]["end"],
-                "text": full_text,
-                "words": all_words,
-            })
+    Args:
+        audio_path: Path to full audio file.
+        chunk_dir: Directory to write chunks into.
+        chunk_duration: Duration of each chunk in seconds.
 
-    logger.info(f"Transcription complete: {len(segments_list)} segments, language={detected_language}")
-    return {"language": detected_language, "segments": segments_list}
+    Returns:
+        List of (chunk_path, start_offset_seconds) tuples.
+    """
+    import subprocess
+
+    # Get total duration
+    from slidegeist.ffmpeg import get_video_duration
+
+    total_duration = get_video_duration(audio_path)
+    chunks: list[tuple[Path, float]] = []
+
+    offset = 0.0
+    chunk_idx = 0
+    while offset < total_duration:
+        chunk_path = chunk_dir / f"chunk_{chunk_idx:04d}.wav"
+        cmd = [
+            "ffmpeg", "-y", "-i", str(audio_path),
+            "-ss", str(offset),
+            "-t", str(chunk_duration),
+            "-ar", "16000", "-ac", "1",
+            "-f", "wav", str(chunk_path),
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+        chunks.append((chunk_path, offset))
+        offset += chunk_duration
+        chunk_idx += 1
+
+    return chunks
 
 
 def transcribe_video(
@@ -181,8 +180,8 @@ def transcribe_video(
 ) -> TranscriptResult:
     """Transcribe video audio using the Voxtype STT service.
 
-    Extracts audio from the video, then sends it to the STT service.
-    The service must be running (see scripts/setup-voxtype-stt.sh).
+    Extracts audio from the video, splits into chunks if needed, then sends
+    each chunk to the STT service. Results are combined with correct timestamps.
 
     Args:
         video_path: Path to the video file.
@@ -201,7 +200,6 @@ def transcribe_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
-    # Check service availability
     if not _is_service_available(stt_url):
         raise ConnectionError(
             f"STT service not available at {stt_url}\n"
@@ -211,14 +209,73 @@ def transcribe_video(
             f"--model {model_size} daemon"
         )
 
-    # Extract audio to a temporary WAV file
     import tempfile
 
-    from slidegeist.ffmpeg import extract_audio
+    from tqdm import tqdm
+
+    from slidegeist.ffmpeg import extract_audio, get_video_duration
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        audio_path = Path(tmp_dir) / "audio.wav"
+        tmp_path = Path(tmp_dir)
+        audio_path = tmp_path / "audio.wav"
         logger.info(f"Extracting audio from {video_path.name}")
         extract_audio(video_path, audio_path)
 
-        return _transcribe_via_service(audio_path, stt_url, model_size)
+        total_duration = get_video_duration(video_path)
+        audio_size_mb = audio_path.stat().st_size / (1024 * 1024)
+        logger.info(
+            f"Audio: {total_duration / 60:.1f} min, {audio_size_mb:.0f} MB"
+        )
+
+        # Split into chunks if audio is large (>50MB ~ >5 min at 16kHz mono)
+        if audio_size_mb > 50:
+            logger.info(
+                f"Splitting audio into {CHUNK_DURATION_SECS}s chunks "
+                f"({int(total_duration / CHUNK_DURATION_SECS) + 1} chunks)"
+            )
+            chunks = _split_audio_into_chunks(audio_path, tmp_path)
+        else:
+            chunks = [(audio_path, 0.0)]
+
+        segments_list: list[Segment] = []
+        start_time = time.time()
+
+        for chunk_path, chunk_offset in tqdm(chunks, desc="Transcribing", unit="chunk"):
+            logger.info(
+                f"Sending chunk at {chunk_offset:.0f}s to STT service"
+            )
+            result = _transcribe_chunk(chunk_path, stt_url, model_size)
+
+            if isinstance(result, dict) and "segments" in result:
+                # Verbose JSON with segments
+                for seg in result["segments"]:
+                    words_list: list[Word] = []
+                    for word in seg.get("words", []):
+                        words_list.append({
+                            "word": word.get("word", ""),
+                            "start": float(word.get("start", 0.0)) + chunk_offset,
+                            "end": float(word.get("end", 0.0)) + chunk_offset,
+                        })
+                    segments_list.append({
+                        "start": float(seg.get("start", 0.0)) + chunk_offset,
+                        "end": float(seg.get("end", 0.0)) + chunk_offset,
+                        "text": seg.get("text", "").strip(),
+                        "words": words_list,
+                    })
+            elif isinstance(result, str) and result.strip():
+                # Plain text response: create a single segment for the chunk
+                segments_list.append({
+                    "start": chunk_offset,
+                    "end": chunk_offset + CHUNK_DURATION_SECS,
+                    "text": result.strip(),
+                    "words": [],
+                })
+
+        elapsed = time.time() - start_time
+        speed_factor = total_duration / elapsed if elapsed > 0 else 0
+        logger.info(
+            f"Transcription complete: {len(segments_list)} segments in "
+            f"{elapsed / 60:.1f}min ({speed_factor:.1f}x realtime)"
+        )
+
+        return {"language": "auto", "segments": segments_list}

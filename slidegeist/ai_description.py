@@ -1,6 +1,5 @@
-"""AI slide description via llama.cpp server (OpenAI-compatible vision API)."""
+"""AI slide description via llama.cpp server (OpenAI-compatible API)."""
 
-import base64
 import json
 import logging
 import re
@@ -30,10 +29,9 @@ def clean_text(text: str) -> str:
 def get_system_instruction() -> str:
     return (
         "You are an expert at analyzing academic and scientific presentation slides. "
-        "Extract ALL content with maximum precision to enable accurate reconstruction "
-        "in ANY format (PowerPoint, LaTeX Beamer, Markdown, Jupyter, Quarto, Manim). "
-        "Slides may contain BOTH handwritten AND machine-printed content. "
-        "Diagrams may need recreation as SVG, TikZ, Manim, or other vector formats. "
+        "Based on the OCR text and speaker transcript, produce a structured description "
+        "that enables accurate reconstruction of the slide in ANY format "
+        "(PowerPoint, LaTeX Beamer, Markdown, Jupyter, Quarto, Manim). "
         "Your structured output will be parsed programmatically by downstream tools. "
         "Prioritize completeness and accuracy over brevity."
     )
@@ -49,82 +47,50 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
     context_parts = []
 
     if transcript:
-        context_parts.append(f"Speaker transcript: {transcript[:500]}")
+        context_parts.append(f"Speaker transcript: {transcript[:1000]}")
 
     if ocr_text:
         context_parts.append(
-            f"OCR text (may contain artifacts): {ocr_text[:500]}"
+            f"OCR text from slide (may contain artifacts): {ocr_text[:1000]}"
         )
 
-    context = "\n".join(context_parts) if context_parts else "No context available"
+    if not context_parts:
+        return "No context available for this slide."
 
-    return f"""Describe this slide so another AI can recreate it exactly. This slide may contain HANDWRITTEN text, formulas, and figures in addition to printed text.
+    context = "\n".join(context_parts)
 
-Reference context (may contain OCR artifacts):
+    return f"""Based on the following context, describe this lecture slide so another AI can recreate it.
+
 {context}
 
 Output exactly 5 numbered sections:
 
 1. TITLE
-[If visible: exact title text. If not visible: infer descriptive title from content (2-8 words)]
+[Infer the slide title from context (2-8 words)]
 
 2. TEXT CONTENT
-[List ALL visible text verbatim in order (top to bottom, left to right)]
-[Specify if handwritten or printed for each text block]
-[Include: headings, body text, bullet points, labels, annotations]
-[Format: Use markdown bullets for lists, preserve line breaks]
+[Reconstruct the slide text from OCR and transcript]
+[Format: Use markdown bullets for lists, preserve structure]
 
 3. FORMULAS
-[Every mathematical equation in LaTeX notation]
-[Specify if handwritten or printed]
-[Format: One equation per line with $...$ for inline or $$...$$ for display]
-[Include: variable definitions, units, equation numbers if present]
+[Any mathematical equations mentioned, in LaTeX notation]
 [If no formulas: write "None"]
 
 4. VISUAL ELEMENTS
-[Describe every diagram, plot, graph, or illustration for recreation]
-[Specify: type (flowchart/plot/diagram), spatial layout (top-left/center/etc), components (boxes/arrows/curves), colors, labels]
-[Note if hand-drawn or computer-generated]
+[Infer diagrams, plots, or illustrations from transcript context]
 [If no visual elements: write "None"]
 
 5. LAYOUT
-[Overall structure: single-column/two-column/grid]
-[Spatial relationships: what's above/below/beside what]
-[Hierarchy: title size, heading levels, emphasis]
+[Infer overall structure from context]
 
 END"""
 
 
-def _image_to_data_url(image_path: Path, max_dimension: int = 1280) -> str:
-    """Load image, resize if needed, and return as base64 data URL.
-
-    Args:
-        image_path: Path to image file.
-        max_dimension: Max width/height in pixels.
-
-    Returns:
-        Data URL string (data:image/jpeg;base64,...).
-    """
-    from PIL import Image
-
-    image = Image.open(image_path)
-
-    if image.width > max_dimension or image.height > max_dimension:
-        scale = min(max_dimension / image.width, max_dimension / image.height)
-        new_size = (int(image.width * scale), int(image.height * scale))
-        image = image.resize(new_size, Image.Resampling.LANCZOS)
-        logger.debug(f"Resized {image_path.name} to {new_size}")
-
-    import io
-
-    buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=90)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/jpeg;base64,{b64}"
-
-
 class LlamaCppDescriber:
-    """AI slide describer via llama.cpp OpenAI-compatible vision API."""
+    """AI slide describer via llama.cpp OpenAI-compatible API.
+
+    Uses OCR text and transcript as input context (text-only model).
+    """
 
     def __init__(
         self,
@@ -132,7 +98,7 @@ class LlamaCppDescriber:
         max_new_tokens: int = 2048,
         temperature: float = 0.7,
     ) -> None:
-        self.name = "llama.cpp (Qwen3.5-VL)"
+        self.name = "llama.cpp (Qwen3.5-9B)"
         self.llm_url = llm_url
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
@@ -159,22 +125,16 @@ class LlamaCppDescriber:
         if not self.is_available():
             return ""
 
+        if not transcript and not ocr_text:
+            logger.debug(f"No context for {image_path.name}, skipping AI description")
+            return ""
+
         system_instruction = get_system_instruction()
         user_text = get_user_prompt(transcript, ocr_text)
-        data_url = _image_to_data_url(image_path)
 
         messages = [
             {"role": "system", "content": system_instruction},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": data_url},
-                    },
-                    {"type": "text", "text": user_text},
-                ],
-            },
+            {"role": "user", "content": user_text},
         ]
 
         payload = json.dumps({
