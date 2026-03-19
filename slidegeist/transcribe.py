@@ -98,7 +98,7 @@ def _transcribe_chunk(
     audio_path: Path,
     stt_url: str,
     model: str,
-) -> str:
+) -> dict[str, object]:
     """Transcribe a single audio chunk via the STT API.
 
     Args:
@@ -107,7 +107,7 @@ def _transcribe_chunk(
         model: Whisper model name.
 
     Returns:
-        Transcribed text string.
+        Parsed JSON response dict with text, segments, duration, language.
     """
     fields: dict[str, str] = {
         "model": model,
@@ -121,12 +121,7 @@ def _transcribe_chunk(
     req.add_header("Content-Type", content_type)
 
     with urlopen(req, timeout=3600) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-
-    # Handle both verbose_json (with segments) and plain json (text only)
-    if "segments" in result and result["segments"]:
-        return result
-    return result.get("text", "")
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def _split_audio_into_chunks(
@@ -227,8 +222,8 @@ def transcribe_video(
             f"Audio: {total_duration / 60:.1f} min, {audio_size_mb:.0f} MB"
         )
 
-        # Split into chunks if audio is large (>50MB ~ >5 min at 16kHz mono)
-        if audio_size_mb > 50:
+        # Split into chunks if audio is longer than chunk duration
+        if total_duration > CHUNK_DURATION_SECS:
             logger.info(
                 f"Splitting audio into {CHUNK_DURATION_SECS}s chunks "
                 f"({int(total_duration / CHUNK_DURATION_SECS) + 1} chunks)"
@@ -240,14 +235,17 @@ def transcribe_video(
         segments_list: list[Segment] = []
         start_time = time.time()
 
+        detected_language = "auto"
         for chunk_path, chunk_offset in tqdm(chunks, desc="Transcribing", unit="chunk"):
             logger.info(
                 f"Sending chunk at {chunk_offset:.0f}s to STT service"
             )
             result = _transcribe_chunk(chunk_path, stt_url, model_size)
 
-            if isinstance(result, dict) and "segments" in result:
-                # Verbose JSON with segments
+            if result.get("language"):
+                detected_language = result["language"]
+
+            if "segments" in result and result["segments"]:
                 for seg in result["segments"]:
                     words_list: list[Word] = []
                     for word in seg.get("words", []):
@@ -262,12 +260,12 @@ def transcribe_video(
                         "text": seg.get("text", "").strip(),
                         "words": words_list,
                     })
-            elif isinstance(result, str) and result.strip():
-                # Plain text response: create a single segment for the chunk
+            elif result.get("text", "").strip():
+                chunk_duration = result.get("duration", CHUNK_DURATION_SECS)
                 segments_list.append({
                     "start": chunk_offset,
-                    "end": chunk_offset + CHUNK_DURATION_SECS,
-                    "text": result.strip(),
+                    "end": chunk_offset + float(chunk_duration),
+                    "text": result["text"].strip(),
                     "words": [],
                 })
 
@@ -278,4 +276,4 @@ def transcribe_video(
             f"{elapsed / 60:.1f}min ({speed_factor:.1f}x realtime)"
         )
 
-        return {"language": "auto", "segments": segments_list}
+        return {"language": detected_language, "segments": segments_list}
