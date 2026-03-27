@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 from slidegeist.constants import (
-    DEFAULT_DEVICE,
     DEFAULT_IMAGE_FORMAT,
     DEFAULT_MIN_SCENE_LEN,
     DEFAULT_OUTPUT_DIR,
@@ -268,7 +267,6 @@ def process_video(
     start_offset: float = DEFAULT_START_OFFSET,
     model: str = DEFAULT_WHISPER_MODEL,
     source_url: str | None = None,
-    device: str = DEFAULT_DEVICE,
     image_format: str = DEFAULT_IMAGE_FORMAT,
     skip_slides: bool = False,
     skip_transcription: bool = False,
@@ -403,14 +401,13 @@ def process_video(
         logger.info("=" * 60)
 
         try:
-            transcript_data = transcribe_video(video_path, model_size=model, device=device)
+            transcript_data = transcribe_video(video_path, model_size=model)
             transcript_segments = transcript_data["segments"]
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Install openai-whisper: pip install openai-whisper\n"
-            error_msg += "2. For MLX (Apple Silicon): pip install mlx-whisper\n"
-            error_msg += "3. For CUDA: Install PyTorch with CUDA support first\n"
+            error_msg += "1. Start voxtype with --service on 127.0.0.1:8427\n"
+            error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)
             # Continue without transcription
@@ -435,6 +432,7 @@ def process_video(
     has_slides = len(slide_metadata) > 0
     transcription_just_ran = not should_skip_transcription and len(transcript_segments) > 0
     needs_ocr = has_slides and not completed_stages["ocr"]
+    ai_descriptions_generated = False
 
     if needs_ocr:
         logger.info("=" * 60)
@@ -479,20 +477,6 @@ def process_video(
     needs_ai = has_slides and not completed_stages["ai_description"]
 
     if needs_ai and not should_skip_ai:
-        # Free GPU memory before loading vision model
-        logger.info("Freeing GPU memory before AI descriptions...")
-        try:
-            import gc
-            import torch  # type: ignore[import-untyped]
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.info("GPU memory cleared")
-        except ImportError:
-            pass  # PyTorch not installed, skip cleanup
-        except Exception as e:
-            logger.debug(f"GPU cleanup warning: {e}")
-
         logger.info("=" * 60)
         logger.info("STEP 5: AI Slide Descriptions")
         logger.info("=" * 60)
@@ -502,44 +486,36 @@ def process_video(
             from slidegeist.export import run_ai_descriptions
 
             describer = build_ai_describer()
-            if describer is None:
-                error_msg = "AI describer not available\n\nTo fix:\n"
-                error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
-                error_msg += "2. For PyTorch: pip install torch transformers\n"
-                error_msg += "3. Install Qwen3-VL model (will download on first run)\n"
-                logger.error(error_msg)
-                mark_stage_failed(output_dir, "ai_description", error_msg)
-            else:
-                logger.info(f"Using {describer.name} for AI descriptions")
-                markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
+            logger.info(f"Using {describer.name} for AI descriptions")
+            markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
 
-                ai_descriptions = run_ai_descriptions(
-                    slide_metadata,
-                    transcript_segments,
-                    describer,
-                    ocr_pipeline,
-                    output_path=markdown_path,
-                    force_redo=force_redo_ai,
-                )
-                export_slides_json(
-                    video_path,
-                    slide_metadata,
-                    transcript_segments,
-                    markdown_path,
-                    model,
-                    ocr_pipeline=ocr_pipeline,
-                    source_url=source_url,
-                    split_slides=split_slides,
-                    ai_descriptions=ai_descriptions,
-                )
-                results["slides_md"] = markdown_path
-                clear_stage_failure(output_dir, "ai_description")
+            ai_descriptions = run_ai_descriptions(
+                slide_metadata,
+                transcript_segments,
+                describer,
+                ocr_pipeline,
+                output_path=markdown_path,
+                force_redo=force_redo_ai,
+            )
+            export_slides_json(
+                video_path,
+                slide_metadata,
+                transcript_segments,
+                markdown_path,
+                model,
+                ocr_pipeline=ocr_pipeline,
+                source_url=source_url,
+                split_slides=split_slides,
+                ai_descriptions=ai_descriptions,
+            )
+            results["slides_md"] = markdown_path
+            clear_stage_failure(output_dir, "ai_description")
+            ai_descriptions_generated = True
 
         except Exception as exc:
             error_msg = f"AI description failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. For MLX (Apple Silicon): pip install mlx-vlm\n"
-            error_msg += "2. For PyTorch CUDA: pip install torch transformers torchvision\n"
-            error_msg += "3. For PyTorch CPU: pip install torch transformers torchvision\n"
+            error_msg += "1. Start llama.cpp on 127.0.0.1:8081\n"
+            error_msg += "2. Verify POST /v1/completions works for the configured model\n"
             logger.error("=" * 60)
             logger.error("AI DESCRIPTION FAILED")
             logger.error("=" * 60)
@@ -574,7 +550,7 @@ def process_video(
         logger.info("✓ Transcription available")
     if completed_stages["ocr"] or needs_ocr:
         logger.info("✓ OCR complete")
-    if completed_stages["ai_description"]:
+    if completed_stages["ai_description"] or ai_descriptions_generated:
         logger.info("✓ AI descriptions generated")
     elif failed_stages.get("ai_description"):
         logger.warning("✗ AI descriptions FAILED - check .ai_description_failed for details")

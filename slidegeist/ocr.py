@@ -1,11 +1,9 @@
-"""OCR pipeline utilities combining classic OCR and Qwen-based refinement."""
+"""OCR pipeline utilities for Tesseract-based slide text extraction."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -153,17 +151,22 @@ class TesseractExtractor:
         except ImportError:
             self._pytesseract = None
             self._version = None
+            self._available = False
             logger.info("pytesseract not installed; OCR will be disabled")
         else:
             self._pytesseract = pytesseract
             try:
                 self._version = str(pytesseract.get_tesseract_version()).strip()
-            except Exception:  # pragma: no cover - rarely triggered
+                self._available = True
+            except Exception:
                 self._version = None
+                self._available = False
+                self._pytesseract = None
+                logger.info("tesseract binary not available; OCR will be disabled")
 
     @property
     def is_available(self) -> bool:
-        return self._pytesseract is not None
+        return self._available
 
     @property
     def version(self) -> str | None:
@@ -228,165 +231,6 @@ class TesseractExtractor:
             "raw_text": raw_text,
             "blocks": blocks,
         }
-
-
-
-
-class MlxQwenRefiner(BaseRefiner):
-    """Use MLX VLM to clean up OCR output when available on Apple Silicon."""
-
-    MODEL_ID = "mlx-community/Qwen3-VL-4B-Instruct-4bit"
-
-    def __init__(
-        self,
-        max_new_tokens: int = 256,
-        temperature: float = 0.0,
-    ) -> None:
-        self.name = "Qwen3-VL-4B (mlx)"
-        self.version = None
-        self.max_new_tokens = max_new_tokens
-        self.temperature = temperature
-
-        self._load = None
-        self._generate = None
-        self._apply_chat_template = None
-        self._model = None
-        self._processor = None
-        self._config = None
-        self._available = False
-
-        if platform.system() != "Darwin":
-            return
-
-        try:
-            from mlx_vlm import generate, load  # type: ignore
-            from mlx_vlm.prompt_utils import apply_chat_template  # type: ignore
-        except ImportError:
-            logger.info("mlx-vlm not installed; MLX refinement disabled")
-            return
-
-        self._load = load
-        self._generate = generate
-        self._apply_chat_template = apply_chat_template
-        self._available = True
-
-        try:
-            import mlx_vlm  # type: ignore
-        except ImportError:  # pragma: no cover - defensive
-            self.version = None
-        else:
-            self.version = getattr(mlx_vlm, "__version__", None)
-
-    def is_available(self) -> bool:
-        return self._available
-
-    def refine(
-        self,
-        image_path: Path,
-        raw_text: str,
-        transcript: str,
-        segments: list[dict[str, Any]],
-    ) -> RefinementOutput | None:
-        if not self._available:
-            return None
-
-        if os.getenv("SLIDEGEIST_DISABLE_QWEN", "").lower() in {"1", "true", "yes"}:
-            logger.debug("Qwen refinement disabled via SLIDEGEIST_DISABLE_QWEN")
-            return None
-
-        self._ensure_loaded()
-
-        if self._model is None or self._processor is None:
-            return None
-
-        prompt_messages = _build_prompt_messages(raw_text, transcript, segments, str(image_path))
-
-        formatted = self._apply_chat_template(  # type: ignore[misc]
-            self._processor,
-            self._config,
-            prompt_messages,
-            add_generation_prompt=True,
-        )
-
-        output = self._generate(  # type: ignore[misc]
-            self._model,
-            self._processor,
-            formatted,
-            images=[str(image_path)],
-            max_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-            verbose=False,
-        )
-
-        if isinstance(output, str):
-            response = output
-        elif isinstance(output, dict):
-            response = str(output.get("choices", [{}])[0].get("text", ""))
-        else:  # pragma: no cover - unexpected path
-            response = str(output)
-
-        parsed = _parse_model_response(response, raw_text)
-        return parsed
-
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
-
-        if self._load is None:
-            raise RuntimeError("mlx-vlm load function unavailable")
-
-        self._model, self._processor = self._load(self.MODEL_ID)
-        self._config = getattr(self._model, "config", None)
-
-
-def _build_prompt_messages(
-    raw_text: str,
-    transcript: str,
-    segments: list[dict[str, Any]],
-    image_token: Any,
-) -> list[dict[str, Any]]:
-    """Construct chat template for Qwen refiners."""
-
-    segment_payload = [
-        {
-            "start": float(segment.get("start", 0.0)),
-            "end": float(segment.get("end", 0.0)),
-            "text": segment.get("text", ""),
-        }
-        for segment in segments
-    ]
-
-    context = {
-        "raw_ocr_text": raw_text,
-        "transcript_context": transcript,
-        "segments": segment_payload,
-    }
-
-    system_instruction = (
-        "You are enhancing OCR for lecture slides."
-        " Return precise slide text and describe non-text elements such as tables,"
-        " figures, drawings, arrows, boxes, charts, diagrams, and annotations."
-        " Answer in JSON with keys 'text' and 'visual_elements'."
-    )
-
-    user_text = (
-        "Analyze the slide image and the provided context."
-        " Respond ONLY with JSON of the form {" "\"text\": ..., \"visual_elements\": [...]" " }"
-        " where visual_elements is a list of short descriptions for each visual item beyond raw text."
-        f"\nContext: {json.dumps(context, ensure_ascii=False)}"
-    )
-
-    content: list[dict[str, Any]] = []
-    if image_token is not None:
-        content.append({"type": "image", "image": image_token})
-    content.append({"type": "text", "text": user_text})
-
-    return [
-        {"role": "system", "content": [{"type": "text", "text": system_instruction}]},
-        {"role": "user", "content": content},
-    ]
-
-
 def _parse_model_response(response: str, fallback_text: str) -> RefinementOutput:
     """Parse model response JSON, tolerating minor formatting errors."""
 

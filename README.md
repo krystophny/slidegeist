@@ -4,15 +4,17 @@
 
 - **Scene detection** using global pixel difference (research-based method optimized for lecture videos)
 - **Automatic slide extraction** with simple numbered filenames (slide_001, slide_002, ...)
-- **Audio transcription** with Whisper large-v3 model (highest quality)
-- **MLX acceleration** on Apple Silicon Macs for 2-3x faster transcription
+- **Audio transcription** through a running OpenAI-compatible Whisper service
 - **Markdown export** - single `slides.md` file (LLM-friendly) or split mode with separate files
-- **OCR with refinement** - Tesseract OCR with optional Qwen3-VL vision model enhancement
+- **OCR** with Tesseract
+- **AI descriptions** through a running `llama.cpp` service
 
 ## Requirements
 
 - **Python ≥ 3.10**
 - **FFmpeg** (must be installed separately and available in PATH)
+- **voxtype** running an OpenAI-compatible transcription service on `127.0.0.1:8427`
+- **llama.cpp** running a completion API on `127.0.0.1:8081`
 
 ### Installing FFmpeg
 
@@ -37,11 +39,6 @@ winget install ffmpeg
 ```bash
 pip install slidegeist
 ```
-
-**Optional AI features:**
-- Apple Silicon: `pip install "slidegeist[mlx]"` for MLX acceleration and Qwen3-VL descriptions
-- CUDA/CPU: `pip install "slidegeist[torch]"` for PyTorch-based Qwen3-VL descriptions
-- Enable Whisper CUDA builds by installing PyTorch with CUDA before Slidegeist
 
 ### Developer Setup
 
@@ -92,14 +89,11 @@ output/
 ### Full Processing
 
 ```bash
-# Basic usage (auto-detects MLX on Apple Silicon, uses large-v3 model)
+# Basic usage (uses the configured remote services)
 slidegeist video.mp4
 
 # Specify output directory
 slidegeist video.mp4 --out my-output/
-
-# Use GPU explicitly (NVIDIA)
-slidegeist video.mp4 --device cuda
 
 # Use smaller/faster model
 slidegeist video.mp4 --model base
@@ -135,8 +129,6 @@ Options:
                          auto-adjust to reach a stable segment count.
   --model NAME          Whisper model: tiny, base, small, medium, large, large-v2, large-v3
                         (default: large-v3)
-  --device NAME         Device: cpu, cuda, or auto (default: auto)
-                        auto = MLX on Apple Silicon if available, else CPU
   --format FMT          Image format: jpg or png (default: jpg)
   -v, --verbose         Enable verbose logging
 ```
@@ -229,19 +221,15 @@ Introduction to Quantum Mechanics
    - Merges segments shorter than 2 seconds to suppress rapid flickers
    - Based on Opencast's VideoSegmenterService implementation
 2. **Slide Extraction**: Extracts frames at 80% through each segment into `slides/` directory with simple `slide_XXX.jpg` names
-3. **Transcription**: Uses Whisper large-v3 for state-of-the-art speech-to-text with timestamps
-   - Auto-detects and uses MLX on Apple Silicon for 2-3x speedup
-   - Falls back to faster-whisper on other platforms
-4. **OCR** (optional): Uses Tesseract OCR with optional Qwen3-VL refinement (MLX only on Apple Silicon)
-5. **Export**: Generates Markdown files with YAML front matter, linking slides to their transcripts and OCR content
+3. **Transcription**: Extracts audio with FFmpeg and submits it to the running voxtype OpenAI-compatible Whisper API
+4. **OCR**: Uses Tesseract OCR on extracted slide images
+5. **AI descriptions**: Sends OCR and transcript context to the running `llama.cpp` server
+6. **Export**: Generates Markdown files with YAML front matter, linking slides to their transcripts and OCR content
 
 ## Performance
 
-**Transcription Speed (Apple Silicon with MLX):**
-- 1 hour lecture: ~10-15 minutes (large-v3 model)
-- Without MLX: ~25-35 minutes
-
 **Model Recommendations:**
+- `large-v3-turbo`: Fast remote transcription when your voxtype service exposes it
 - `large-v3`: Best accuracy (default) - recommended for production
 - `medium`: Good balance - 2x faster, slightly lower accuracy
 - `base`: Quick testing - 5x faster, noticeably lower accuracy
@@ -249,32 +237,17 @@ Introduction to Quantum Mechanics
 
 ## Troubleshooting
 
-### macOS Hard Crashes with MLX
-
-If Python crashes hard (macOS crash dialog) when using MLX on Apple Silicon:
+### Remote Services
 
 ```bash
-# Disable MLX and use CPU-based transcription instead
-export SLIDEGEIST_DISABLE_MLX=1
-slidegeist video.mp4
+# Verify llama.cpp
+curl http://127.0.0.1:8081/health
+
+# Verify voxtype
+curl -I http://127.0.0.1:8427/v1/audio/transcriptions
 ```
 
-This forces CPU mode even on Apple Silicon. The crash typically happens when:
-- MLX libraries are corrupted or partially installed
-- Metal framework has compatibility issues
-- System libraries are out of date
-
-To fix permanently, try:
-```bash
-# Reinstall MLX packages
-pip uninstall mlx-whisper mlx-vlm -y
-pip install --no-cache-dir mlx-whisper mlx-vlm
-```
-
-You can also explicitly use CPU mode without the environment variable:
-```bash
-slidegeist video.mp4 --device cpu
-```
+Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_VOXTYPE_URL` if the services listen on different addresses.
 
 ## Limitations
 

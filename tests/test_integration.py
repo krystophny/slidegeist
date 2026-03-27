@@ -58,7 +58,6 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
         min_scene_len=1.0,
         start_offset=0.0,
         model="tiny",
-        device="cpu",
         image_format="png",
     )
 

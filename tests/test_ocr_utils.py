@@ -1,4 +1,4 @@
-"""Tests for OCR refinement helpers and manual end-to-end checks."""
+"""Tests for OCR helpers and manual end-to-end checks."""
 
 from pathlib import Path
 
@@ -73,7 +73,7 @@ def test_parse_model_response(payload: str, expected_text: str, expected_element
 
 
 @pytest.mark.manual
-def test_manual_qwen_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
+def test_manual_ocr_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
     from PIL import Image, ImageDraw
 
     from slidegeist.ocr import build_default_ocr_pipeline
@@ -88,7 +88,7 @@ def test_manual_qwen_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
 
     pipeline = build_default_ocr_pipeline()
     assert pipeline._primary is not None and pipeline._primary.is_available, "Tesseract missing"
-    assert pipeline._refiner is not None and pipeline._refiner.is_available(), "Qwen refiner missing"
+    assert pipeline._refiner is None
 
     result = pipeline.process(
         image_path=image_path,
@@ -97,4 +97,4 @@ def test_manual_qwen_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
     )
 
     assert "Deep" in result["final_text"]
-    assert any("rectangle" in item.lower() or "box" in item.lower() for item in result["visual_elements"])
+    assert result["visual_elements"] == []

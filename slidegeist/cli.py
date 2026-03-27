@@ -7,7 +7,6 @@ from pathlib import Path
 
 from slidegeist import __version__
 from slidegeist.constants import (
-    DEFAULT_DEVICE,
     DEFAULT_IMAGE_FORMAT,
     DEFAULT_MIN_SCENE_LEN,
     DEFAULT_OUTPUT_DIR,
@@ -136,7 +135,6 @@ def handle_process(args: argparse.Namespace) -> None:
             start_offset=args.start_offset,
             model=args.model,
             source_url=source_url,
-            device=args.device,
             image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
             split_slides=getattr(args, 'split', False),
             retry_failed=getattr(args, 'retry_failed', False),
@@ -216,9 +214,6 @@ Examples:
 
   # Use smaller/faster model
   slidegeist lecture.mp4 --model tiny
-
-  # Use GPU explicitly
-  slidegeist lecture.mp4 --device cuda
 
   # Extract only slides (no transcription)
   slidegeist slides lecture.mp4
@@ -306,14 +301,8 @@ Examples:
     process_parser.add_argument(
         "--model",
         default=DEFAULT_WHISPER_MODEL,
-        choices=["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"],
+        choices=["tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "large-v3-turbo"],
         help=f"Whisper model size (default: {DEFAULT_WHISPER_MODEL})"
-    )
-    process_parser.add_argument(
-        "--device",
-        default=DEFAULT_DEVICE,
-        choices=["cpu", "cuda", "auto"],
-        help=f"Processing device (default: {DEFAULT_DEVICE} - uses MLX on Apple Silicon if available)"
     )
     process_parser.add_argument(
         "--split",

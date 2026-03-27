@@ -17,7 +17,8 @@ DEFAULT_MAX_CYCLES = 3       # Maximum optimization iterations (Opencast default
 
 # Whisper transcription
 DEFAULT_WHISPER_MODEL = "large-v3"  # Best accuracy
-DEFAULT_DEVICE = "auto"  # Auto-detect MLX on Apple Silicon, else CPU
+DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"
+DEFAULT_VOXTYPE_URL = "http://127.0.0.1:8427"
 
 # Transcription quality thresholds
 COMPRESSION_RATIO_THRESHOLD = 2.4  # Prevent hanging on compression issues
