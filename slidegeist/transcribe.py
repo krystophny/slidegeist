@@ -100,11 +100,37 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
     }
 
 
+CHUNK_DURATION_S = 120  # 2-minute chunks to stay within voxtype upload limits
+
+
+def _split_audio_chunks(audio_path: Path, chunk_dir: Path,
+                        chunk_duration: int = CHUNK_DURATION_S) -> list[Path]:
+    """Split a WAV file into fixed-length chunks using ffmpeg segment muxer."""
+    import subprocess as _sp
+
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    pattern = str(chunk_dir / "chunk_%04d.wav")
+    cmd = [
+        "ffmpeg", "-i", str(audio_path),
+        "-f", "segment", "-segment_time", str(chunk_duration),
+        "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
+        "-y", pattern,
+    ]
+    _sp.run(cmd, check=True, capture_output=True, text=True)
+    chunks = sorted(chunk_dir.glob("chunk_*.wav"))
+    logger.info("Split audio into %d chunks of %ds each", len(chunks), chunk_duration)
+    return chunks
+
+
 def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
 ) -> TranscriptResult:
-    """Extract audio and transcribe it with the configured voxtype service."""
+    """Extract audio and transcribe it with the configured voxtype service.
+
+    Long audio is automatically split into 2-minute chunks to stay within
+    voxtype upload size limits, then reassembled with corrected timestamps.
+    """
 
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
@@ -122,11 +148,43 @@ def transcribe_video(
         )
 
     with TemporaryDirectory(prefix="slidegeist-voxtype-") as temp_dir:
-        audio_path = Path(temp_dir) / f"{video_path.stem}.wav"
+        temp = Path(temp_dir)
+        audio_path = temp / f"{video_path.stem}.wav"
         extract_audio(video_path, audio_path)
-        logger.info("Submitting audio to voxtype with model %s", model_size)
-        payload = voxtype_transcribe(audio_path, model=model_size)
 
-    result = _normalize_transcript(payload)
-    logger.info("Voxtype transcription complete: %d segments", len(result["segments"]))
+        chunks = _split_audio_chunks(audio_path, temp / "chunks")
+
+        all_segments: list[Segment] = []
+        detected_language = "unknown"
+
+        for idx, chunk_path in enumerate(chunks):
+            offset = idx * CHUNK_DURATION_S
+            logger.info(
+                "Transcribing chunk %d/%d (offset %.0fs) with model %s",
+                idx + 1, len(chunks), offset, model_size,
+            )
+            try:
+                payload = voxtype_transcribe(chunk_path, model=model_size)
+            except Exception as exc:
+                logger.warning("Chunk %d failed: %s — skipping", idx + 1, exc)
+                continue
+
+            chunk_result = _normalize_transcript(payload)
+            if chunk_result["language"] != "unknown":
+                detected_language = chunk_result["language"]
+
+            for seg in chunk_result["segments"]:
+                seg["start"] += offset
+                seg["end"] += offset
+                for w in seg.get("words", []):
+                    w["start"] += offset
+                    w["end"] += offset
+                all_segments.append(seg)
+
+    result: TranscriptResult = {
+        "language": detected_language,
+        "segments": all_segments,
+    }
+    logger.info("Voxtype transcription complete: %d segments from %d chunks",
+                len(all_segments), len(chunks))
     return result
