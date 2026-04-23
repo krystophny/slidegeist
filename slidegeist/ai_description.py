@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path
 
-from slidegeist.services import llama_cpp_complete
+from slidegeist.services import get_llama_cpp_model, llama_cpp_complete
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,8 @@ class LlamaCppSlideDescriber(BaseSlideDescriber):
         max_new_tokens: int = 1536,
         temperature: float = 0.0,
     ) -> None:
-        self.name = "qwen3.5-9b (llama.cpp)"
+        model_id = get_llama_cpp_model() or "unknown"
+        self.name = f"{model_id} (llama.cpp)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 

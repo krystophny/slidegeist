@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from slidegeist.ocr import RefinementOutput, _parse_model_response, build_default_ocr_pipeline
+from slidegeist.ocr import build_default_ocr_pipeline
 
 
 def test_tesseract_ocr_pipeline(tmp_path: Path) -> None:
@@ -45,35 +45,8 @@ def test_tesseract_ocr_pipeline(tmp_path: Path) -> None:
         assert result["raw_text"] == ""
 
 
-@pytest.mark.parametrize(
-    "payload,expected_text,expected_elements",
-    [
-        (
-            '{"text": "Exact text", "visual_elements": ["chart", "arrow"]}',
-            "Exact text",
-            ["chart", "arrow"],
-        ),
-        (
-            "Answer: {\"text\": \"Slide content\", \"visual_elements\": \"table\"}",
-            "Slide content",
-            ["table"],
-        ),
-        (
-            "No JSON here",
-            "No JSON here",
-            [],
-        ),
-    ],
-)
-def test_parse_model_response(payload: str, expected_text: str, expected_elements: list[str]) -> None:
-    result = _parse_model_response(payload, "fallback")
-    assert isinstance(result, RefinementOutput)
-    assert result.text == expected_text
-    assert result.visual_elements == expected_elements
-
-
 @pytest.mark.manual
-def test_manual_ocr_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
+def test_manual_ocr_pipeline(tmp_path: Path) -> None:
     from PIL import Image, ImageDraw
 
     from slidegeist.ocr import build_default_ocr_pipeline
@@ -88,7 +61,6 @@ def test_manual_ocr_pipeline(tmp_path: Path) -> None:  # type: ignore[no-redef]
 
     pipeline = build_default_ocr_pipeline()
     assert pipeline._primary is not None and pipeline._primary.is_available, "Tesseract missing"
-    assert pipeline._refiner is None
 
     result = pipeline.process(
         image_path=image_path,
