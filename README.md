@@ -13,7 +13,8 @@
 
 - **Python ≥ 3.10**
 - **FFmpeg** (must be installed separately and available in PATH)
-- **voxtype** running an OpenAI-compatible transcription service on `127.0.0.1:8427`
+- **Whisper server** speaking the OpenAI `/v1/audio/transcriptions` API on `127.0.0.1:8427`
+  (e.g. `whisper.cpp`'s `whisper-server`, faster-whisper-server, LocalAI, Vox-Box)
 - **llama.cpp** running a completion API on `127.0.0.1:8081`
 
 ### Installing FFmpeg
@@ -221,7 +222,7 @@ Introduction to Quantum Mechanics
    - Merges segments shorter than 2 seconds to suppress rapid flickers
    - Based on Opencast's VideoSegmenterService implementation
 2. **Slide Extraction**: Extracts frames at 80% through each segment into `slides/` directory with simple `slide_XXX.jpg` names
-3. **Transcription**: Extracts audio with FFmpeg and submits it to the running voxtype OpenAI-compatible Whisper API
+3. **Transcription**: Extracts audio with FFmpeg and submits it, in 2-minute chunks, to the running OpenAI-compatible Whisper HTTP API
 4. **OCR**: Uses Tesseract OCR on extracted slide images
 5. **AI descriptions**: Sends OCR and transcript context to the running `llama.cpp` server
 6. **Export**: Generates Markdown files with YAML front matter, linking slides to their transcripts and OCR content
@@ -229,7 +230,7 @@ Introduction to Quantum Mechanics
 ## Performance
 
 **Model Recommendations:**
-- `large-v3-turbo`: Fast remote transcription when your voxtype service exposes it
+- `large-v3-turbo`: Fast remote transcription when your Whisper server exposes it
 - `large-v3`: Best accuracy (default) - recommended for production
 - `medium`: Good balance - 2x faster, slightly lower accuracy
 - `base`: Quick testing - 5x faster, noticeably lower accuracy
@@ -243,11 +244,11 @@ Introduction to Quantum Mechanics
 # Verify llama.cpp
 curl http://127.0.0.1:8081/health
 
-# Verify voxtype
+# Verify the Whisper server
 curl -I http://127.0.0.1:8427/v1/audio/transcriptions
 ```
 
-Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_VOXTYPE_URL` if the services listen on different addresses.
+Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_WHISPER_URL` if the services listen on different addresses.
 
 ## Limitations
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
 
-from slidegeist.constants import DEFAULT_LLAMACPP_URL, DEFAULT_VOXTYPE_URL
+from slidegeist.constants import DEFAULT_LLAMACPP_URL, DEFAULT_WHISPER_URL
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +23,9 @@ def get_llama_cpp_url() -> str:
     return os.getenv("SLIDEGEIST_LLAMACPP_URL", DEFAULT_LLAMACPP_URL).rstrip("/")
 
 
-def get_voxtype_url() -> str:
-    """Return the configured voxtype base URL."""
-    return os.getenv("SLIDEGEIST_VOXTYPE_URL", DEFAULT_VOXTYPE_URL).rstrip("/")
+def get_whisper_url() -> str:
+    """Return the configured Whisper server base URL."""
+    return os.getenv("SLIDEGEIST_WHISPER_URL", DEFAULT_WHISPER_URL).rstrip("/")
 
 
 def _http_json(
@@ -64,9 +64,9 @@ def is_llama_cpp_available(timeout: float = 2.0) -> bool:
     return _http_status(f"{get_llama_cpp_url()}/health", timeout=timeout) == 200
 
 
-def is_voxtype_available(timeout: float = 2.0) -> bool:
-    """Check whether the configured voxtype transcription service is reachable."""
-    status = _http_status(f"{get_voxtype_url()}/v1/audio/transcriptions", timeout=timeout)
+def is_whisper_available(timeout: float = 2.0) -> bool:
+    """Check whether the configured Whisper transcription server is reachable."""
+    status = _http_status(f"{get_whisper_url()}/v1/audio/transcriptions", timeout=timeout)
     return status in {200, 405}
 
 
@@ -187,20 +187,20 @@ def _read_response(response: HTTPResponse) -> dict[str, Any]:
     return json.loads(raw) if raw else {}
 
 
-def voxtype_transcribe(
+def whisper_transcribe(
     audio_path: Path,
     *,
     model: str,
     language: str = "auto",
     timeout: float = 1800.0,
 ) -> dict[str, Any]:
-    """Transcribe an audio file through voxtype's OpenAI-compatible STT API."""
+    """Transcribe an audio file through the Whisper-compatible HTTP API."""
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    endpoint = parse.urlsplit(f"{get_voxtype_url()}/v1/audio/transcriptions")
+    endpoint = parse.urlsplit(f"{get_whisper_url()}/v1/audio/transcriptions")
     if not endpoint.hostname:
-        raise RuntimeError("Voxtype URL is missing a hostname")
+        raise RuntimeError("Whisper URL is missing a hostname")
 
     boundary = f"slidegeist-{uuid.uuid4().hex}"
     fields = [
@@ -236,7 +236,7 @@ def voxtype_transcribe(
         response = connection.getresponse()
         payload = _read_response(response)
         if response.status >= 400:
-            raise RuntimeError(f"voxtype HTTP {response.status}: {payload}")
+            raise RuntimeError(f"whisper HTTP {response.status}: {payload}")
         return payload
     finally:
         connection.close()

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Slidegeist extracts slides and timestamped transcripts from lecture videos using FFmpeg scene detection and two locally hosted HTTP services: a llama.cpp server for text generation and a voxtype (Whisper) server for transcription. No ML dependencies are installed in-process; slidegeist is effectively a small orchestrator around FFmpeg, Tesseract, and those two REST APIs.
+Slidegeist extracts slides and timestamped transcripts from lecture videos using FFmpeg scene detection and two locally hosted HTTP services: a llama.cpp server for text generation and an OpenAI-compatible Whisper server (e.g. whisper.cpp's `whisper-server`) for transcription. No ML dependencies are installed in-process; slidegeist is effectively a small orchestrator around FFmpeg, Tesseract, and those two REST APIs.
 
 ## Build, Test, and Lint Commands
 
@@ -42,27 +42,47 @@ slidegeist slides video.mp4                 # Extract only slides (no transcript
 
 Slidegeist talks to two locally hosted OpenAI-compatible HTTP endpoints. Both must be reachable before the pipeline is run; there is no embedded fallback.
 
-| Service  | Default URL              | Env override                  | Purpose                                  |
-|----------|--------------------------|-------------------------------|------------------------------------------|
-| llama.cpp| `http://127.0.0.1:8081`  | `SLIDEGEIST_LLAMACPP_URL`     | Text completions (slide descriptions)    |
-| voxtype  | `http://127.0.0.1:8427`  | `SLIDEGEIST_VOXTYPE_URL`      | Whisper-style audio transcription        |
+| Service         | Default URL              | Env override                  | Purpose                                  |
+|-----------------|--------------------------|-------------------------------|------------------------------------------|
+| llama.cpp       | `http://127.0.0.1:8081`  | `SLIDEGEIST_LLAMACPP_URL`     | Text completions (slide descriptions)    |
+| Whisper server  | `http://127.0.0.1:8427`  | `SLIDEGEIST_WHISPER_URL`      | OpenAI-compatible audio transcription    |
 
-All HTTP is implemented in `slidegeist/services.py` using the stdlib only. Health probes hit `/health` on llama.cpp and `/v1/audio/transcriptions` on voxtype.
+All HTTP is implemented in `slidegeist/services.py` using the stdlib only. Health probes hit `/health` on llama.cpp and `/v1/audio/transcriptions` on the Whisper server.
 
-### voxtype branch requirement
+### Recommended Whisper server: whisper.cpp
 
-The OpenAI-compatible STT daemon lives on the **`feature/single-daemon-openai-stt-api`** branch of voxtype. `main` does not yet expose `/v1/audio/transcriptions`, so slidegeist will not work against a stock voxtype release until that branch is merged. Run voxtype from that branch (`voxtype --service --service-host 127.0.0.1 --service-port 8427`) or swap in one of the alternatives below.
+The canonical local setup on Arch/CachyOS:
 
-### Drop-in Whisper-compatible alternatives
+```bash
+pacman -S whisper.cpp-cuda                               # or whisper.cpp for CPU-only
+yay -S whisper.cpp-model-large-v3-turbo-q5_0
 
-Any server that implements `POST /v1/audio/transcriptions` with `response_format=verbose_json` and segment/word `timestamp_granularities` will work. Point slidegeist at it with `SLIDEGEIST_VOXTYPE_URL`. Tested-compatible options:
+whisper-server \
+  --model /usr/share/whisper.cpp-model-large-v3-turbo-q5_0/ggml-large-v3-turbo-q5_0.bin \
+  --host 127.0.0.1 --port 8427 \
+  --inference-path /v1/audio/transcriptions \
+  --convert --threads 4
+```
 
-- **whisper.cpp `whisper-server`** — ships in the [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) repo. Start with `whisper-server --model models/ggml-large-v3.bin --host 127.0.0.1 --port 8427 --inference-path /v1/audio/transcriptions --convert`.
+A ready-made user unit lives at `~/.config/systemd/user/whisper-server.service` on the developer machine. `whisper.cpp`'s server returns full `verbose_json` with per-segment and per-word timestamps, which slidegeist needs for slide/transcript alignment.
+
+### Drop-in alternatives
+
+Any server that implements `POST /v1/audio/transcriptions` with `response_format=verbose_json` and populated `segments`/`words` will work. Point slidegeist at it with `SLIDEGEIST_WHISPER_URL`:
+
 - **[faster-whisper-server](https://github.com/fedirz/faster-whisper-server)** — CTranslate2 backend, OpenAI-compatible, Docker image available.
 - **[LocalAI](https://localai.io/features/audio-to-text/)** — generic OpenAI-compatible gateway that can serve Whisper (plus llama.cpp and more) from a single daemon.
 - **[Vox-Box](https://github.com/gpustack/vox-box)** — OpenAI-compatible audio server with Whisper turbo support.
 
-Word-level timestamps are required for slide/transcript alignment; check that your chosen server actually emits them in `verbose_json` before switching.
+Before switching servers, verify the response shape:
+
+```bash
+curl -s -F "model=large-v3-turbo" -F "response_format=verbose_json" \
+     -F "timestamp_granularities[]=segment" -F "timestamp_granularities[]=word" \
+     -F "file=@clip.wav" http://127.0.0.1:8427/v1/audio/transcriptions | jq 'keys'
+```
+
+The response must contain a non-empty `segments` array with real `start`/`end` values. Without it, slide-level transcript windows collapse to zero width.
 
 ## Architecture
 
@@ -83,7 +103,7 @@ The main `process_video()` function orchestrates processing with smart resume ca
    - Simple numbered filenames: `slide_001.jpg`, `slide_002.jpg`, ...
    - Supports JPG and PNG formats.
 
-3. **Transcription** (`transcribe.py` + `services.voxtype_transcribe`): Extracts mono 16 kHz WAV, splits into 120 s chunks to stay within voxtype upload limits, POSTs each chunk to `/v1/audio/transcriptions` with `verbose_json`, and reassembles segments/words with offset-corrected timestamps.
+3. **Transcription** (`transcribe.py` + `services.whisper_transcribe`): Extracts mono 16 kHz WAV, splits into 120 s chunks to stay within server upload limits, POSTs each chunk to `/v1/audio/transcriptions` with `verbose_json`, and reassembles segments/words with offset-corrected timestamps.
 
 4. **OCR** (`ocr.py`): Tesseract only (`eng+deu`, PSM 1). There is no image-based refinement stage; the only AI step is the text-only describer in (5).
 
@@ -136,9 +156,9 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 - `DEFAULT_MIN_SCENE_LEN = 2.0`: Minimum segment duration (seconds).
 - `DEFAULT_START_OFFSET = 3.0`: Skip first N seconds to avoid setup noise.
 - `DEFAULT_SEGMENTS_PER_HOUR = 30`: Opencast optimizer target.
-- `DEFAULT_WHISPER_MODEL = "large-v3"`: Model name passed to voxtype.
+- `DEFAULT_WHISPER_MODEL = "large-v3"`: Model name passed to the Whisper server.
 - `DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"`
-- `DEFAULT_VOXTYPE_URL = "http://127.0.0.1:8427"`
+- `DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"`
 
 ## Code Style Requirements
 
@@ -158,7 +178,7 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 
 **External services (not Python deps, must be running):**
 - A llama.cpp server with any chat/completion model — Qwen-family recommended.
-- A voxtype / Whisper-compatible STT server exposing `/v1/audio/transcriptions`.
+- A Whisper-compatible STT server exposing `/v1/audio/transcriptions` (whisper.cpp's `whisper-server` recommended).
 
 **Dev:**
 - pytest, pytest-cov, ruff, mypy.

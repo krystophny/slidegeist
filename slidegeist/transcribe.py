@@ -1,4 +1,4 @@
-"""Audio transcription through the local voxtype OpenAI-compatible service."""
+"""Audio transcription through a local OpenAI-compatible Whisper server."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TypedDict
 
 from slidegeist.constants import DEFAULT_WHISPER_MODEL
 from slidegeist.ffmpeg import extract_audio, get_video_duration
-from slidegeist.services import voxtype_transcribe
+from slidegeist.services import whisper_transcribe
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
     }
 
 
-CHUNK_DURATION_S = 120  # 2-minute chunks to stay within voxtype upload limits
+CHUNK_DURATION_S = 120  # 2-minute chunks to stay within server upload limits
 
 
 def _split_audio_chunks(audio_path: Path, chunk_dir: Path,
@@ -126,10 +126,10 @@ def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
 ) -> TranscriptResult:
-    """Extract audio and transcribe it with the configured voxtype service.
+    """Extract audio and transcribe it via the configured Whisper HTTP server.
 
     Long audio is automatically split into 2-minute chunks to stay within
-    voxtype upload size limits, then reassembled with corrected timestamps.
+    server upload size limits, then reassembled with corrected timestamps.
     """
 
     if not video_path.exists():
@@ -147,7 +147,7 @@ def transcribe_video(
             video_duration,
         )
 
-    with TemporaryDirectory(prefix="slidegeist-voxtype-") as temp_dir:
+    with TemporaryDirectory(prefix="slidegeist-whisper-") as temp_dir:
         temp = Path(temp_dir)
         audio_path = temp / f"{video_path.stem}.wav"
         extract_audio(video_path, audio_path)
@@ -164,7 +164,7 @@ def transcribe_video(
                 idx + 1, len(chunks), offset, model_size,
             )
             try:
-                payload = voxtype_transcribe(chunk_path, model=model_size)
+                payload = whisper_transcribe(chunk_path, model=model_size)
             except Exception as exc:
                 logger.warning("Chunk %d failed: %s — skipping", idx + 1, exc)
                 continue
@@ -185,6 +185,6 @@ def transcribe_video(
         "language": detected_language,
         "segments": all_segments,
     }
-    logger.info("Voxtype transcription complete: %d segments from %d chunks",
+    logger.info("Whisper transcription complete: %d segments from %d chunks",
                 len(all_segments), len(chunks))
     return result

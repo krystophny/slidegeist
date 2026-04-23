@@ -406,7 +406,8 @@ def process_video(
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Start voxtype with --service on 127.0.0.1:8427\n"
+            error_msg += "1. Start a Whisper-compatible server on 127.0.0.1:8427\n"
+            error_msg += "   (e.g. whisper.cpp's whisper-server --inference-path /v1/audio/transcriptions)\n"
             error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)

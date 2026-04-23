@@ -18,7 +18,7 @@ DEFAULT_MAX_CYCLES = 3       # Maximum optimization iterations (Opencast default
 # Whisper transcription
 DEFAULT_WHISPER_MODEL = "large-v3"  # Best accuracy
 DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"
-DEFAULT_VOXTYPE_URL = "http://127.0.0.1:8427"
+DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"
 
 # Output formats
 DEFAULT_IMAGE_FORMAT = "jpg"
