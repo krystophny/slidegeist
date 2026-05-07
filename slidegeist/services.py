@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import uuid
 from functools import lru_cache
 from http.client import HTTPConnection, HTTPSConnection, HTTPResponse
@@ -99,6 +100,21 @@ def get_llama_cpp_model(base_url: str | None = None) -> str | None:
     return None
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_OPEN_THINK_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks emitted by reasoning models.
+
+    Handles both completed blocks and orphaned openings (when generation hit
+    the token limit before the model closed the think tag).
+    """
+    text = _THINK_BLOCK_RE.sub("", text)
+    text = _OPEN_THINK_RE.sub("", text)
+    return text.strip()
+
+
 def llama_cpp_complete(
     prompt: str,
     *,
@@ -106,18 +122,25 @@ def llama_cpp_complete(
     temperature: float = 0.0,
     timeout: float = 180.0,
 ) -> str:
-    """Run a text completion against llama.cpp's OpenAI-compatible API."""
+    """Run a chat completion against llama.cpp's OpenAI-compatible API.
+
+    Uses /v1/chat/completions so reasoning models can be told to skip
+    <think> blocks via chat_template_kwargs={"enable_thinking": False}.
+    Stripping <think>...</think> on the client side covers servers that
+    ignore the kwarg.
+    """
     payload: dict[str, Any] = {
-        "prompt": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     model = get_llama_cpp_model()
     if model:
         payload["model"] = model
 
     response = _http_json(
-        f"{get_llama_cpp_url()}/v1/completions",
+        f"{get_llama_cpp_url()}/v1/chat/completions",
         method="POST",
         payload=payload,
         timeout=timeout,
@@ -130,11 +153,12 @@ def llama_cpp_complete(
     if not isinstance(choice, dict):
         raise RuntimeError("llama.cpp returned an invalid completion payload")
 
-    text = choice.get("text", "")
+    message = choice.get("message", {})
+    text = message.get("content", "") if isinstance(message, dict) else ""
     if not isinstance(text, str):
         raise RuntimeError("llama.cpp completion text was not a string")
 
-    return text.strip()
+    return _strip_reasoning(text)
 
 
 def _build_multipart_prefix(
