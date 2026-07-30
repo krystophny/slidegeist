@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 from slidegeist import services
-from slidegeist.transcribe import _chunk_start_offsets, transcribe_video
+from slidegeist.transcribe import _chunk_start_offsets, _normalize_transcript, transcribe_video
 
 
 def test_llama_completion_sends_image_and_configured_model(
@@ -112,3 +112,38 @@ def test_transcript_chunk_offsets_follow_pcm_sample_counts(tmp_path: Path) -> No
             stream.writeframes(b"\0\0" * frames)
 
     assert _chunk_start_offsets(chunks) == [0.0, 1.25]
+
+
+def test_incompatible_whisper_vad_word_clock_is_not_published() -> None:
+    """Words on a silence-compressed clock must not masquerade as slide timing."""
+    payload = {
+        "language": "en",
+        "segments": [
+            {
+                "start": 14.66,
+                "end": 18.02,
+                "text": "Denmark they did this annual bird",
+                "words": [
+                    {"word": "Denmark", "start": 12.6, "end": 13.2},
+                    {"word": "bird", "start": 14.96, "end": 15.45},
+                ],
+            },
+            {
+                "start": 18.02,
+                "end": 23.47,
+                "text": "deaths by wind turbines",
+                "words": [
+                    {"word": "deaths", "start": 15.46, "end": 16.1},
+                    {"word": "turbines", "start": 18.8, "end": 19.95},
+                ],
+            },
+        ],
+    }
+
+    result = _normalize_transcript(payload)
+
+    assert [(segment["start"], segment["end"]) for segment in result["segments"]] == [
+        (14.66, 18.02),
+        (18.02, 23.47),
+    ]
+    assert all(not segment["words"] for segment in result["segments"])

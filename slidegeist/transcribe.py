@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,6 +56,9 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
 
             start = float(segment.get("start", 0.0))
             end = float(segment.get("end", start))
+            if not math.isfinite(start) or not math.isfinite(end) or end < start:
+                logger.warning("Discarding transcript segment with invalid timing")
+                continue
             words: list[Word] = []
             words_payload = segment.get("words", [])
 
@@ -65,11 +69,13 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
                     word_text = str(word.get("word", "")).strip()
                     if not word_text:
                         continue
+                    word_start = float(word.get("start", start))
+                    word_end = float(word.get("end", end))
                     words.append(
                         {
                             "word": word_text,
-                            "start": float(word.get("start", start)),
-                            "end": float(word.get("end", end)),
+                            "start": word_start,
+                            "end": word_end,
                         }
                     )
 
@@ -81,6 +87,39 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
                     "words": words,
                 }
             )
+
+    # whisper.cpp with VAD currently reports word times on the concatenated
+    # speech timeline while segment times refer to the original audio. A mixed
+    # time base is worse than no word timing: consumers may align words to the
+    # wrong slide. If any word violates its segment, discard word timing for the
+    # complete response while preserving the independently timed segments.
+    previous_word_end = -math.inf
+    invalid_word_timing = False
+    for segment in segments:
+        for word in segment["words"]:
+            word_start = word["start"]
+            word_end = word["end"]
+            if (
+                not math.isfinite(word_start)
+                or not math.isfinite(word_end)
+                or word_end < word_start
+                or word_start < segment["start"] - 0.25
+                or word_end > segment["end"] + 0.25
+                or word_start < previous_word_end - 0.25
+            ):
+                invalid_word_timing = True
+                break
+            previous_word_end = word_end
+        if invalid_word_timing:
+            break
+
+    if invalid_word_timing:
+        logger.warning(
+            "Whisper returned word and segment timestamps on incompatible time bases; "
+            "discarding unreliable word timing"
+        )
+        for segment in segments:
+            segment["words"] = []
 
     if not segments:
         text = str(payload.get("text", "")).strip()
