@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from time import monotonic
 
-from slidegeist.transition_detector import analyze_slide_transitions
+from slidegeist.transition_detector import _sampled_frames, analyze_slide_transitions
 from tests.synthetic_video import make_slide_video, make_vfr_slide_video
 
 
@@ -58,6 +58,27 @@ def test_sampler_decodes_long_hold_in_single_pass(tmp_path: Path) -> None:
 
     _match(analysis.timestamps, [3.0, 17.0])
     assert elapsed < 10.0
+
+
+def test_sampler_can_be_cancelled_without_reporting_decode_failure(tmp_path: Path) -> None:
+    """Stopping an analysis consumer early cleanly terminates its FFmpeg producer."""
+    video = tmp_path / "cancel.avi"
+    make_slide_video(video, [3.0, 17.0], duration=20.0)
+    timestamps: list[float] = []
+    frames = _sampled_frames(
+        video,
+        start_offset=0.0,
+        sample_interval=0.5,
+        max_width=480,
+        source_width=1280,
+        source_height=720,
+        timestamps=timestamps,
+    )
+
+    next(frames)
+    frames.close()
+
+    assert timestamps == []
 
 
 def test_dense_irregular_transitions_do_not_raise_their_own_threshold(tmp_path: Path) -> None:

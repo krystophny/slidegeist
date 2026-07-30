@@ -307,10 +307,12 @@ def _sampled_frames(
         )
         assert process.stdout is not None
         assert process.stderr is not None
+        completed_read = False
         try:
             while True:
                 raw = _read_exact(process.stdout, frame_bytes)
                 if not raw:
+                    completed_read = True
                     break
                 if len(raw) != frame_bytes:
                     raise RuntimeError(
@@ -322,11 +324,13 @@ def _sampled_frames(
                     3,
                 )
         finally:
+            if not completed_read and process.poll() is None:
+                process.terminate()
             process.stdout.close()
             stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
             return_code = process.wait()
             process.stderr.close()
-            if return_code:
+            if return_code and completed_read:
                 raise RuntimeError(f"FFmpeg sampled-frame decode failed: {stderr}")
         timestamps.extend(
             float(line)
