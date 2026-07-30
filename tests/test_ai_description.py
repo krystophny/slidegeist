@@ -25,3 +25,5 @@ def test_prompt_defines_non_instructional_ui_as_non_slide() -> None:
     assert 'Write exactly "NON-SLIDE"' in prompt
     assert "file browser" in prompt
     assert "substantially obscured by operating-system UI" in prompt
+    assert "stop immediately after the word NON-SLIDE" in prompt
+    assert "If the frame type is SLIDE, continue" in prompt

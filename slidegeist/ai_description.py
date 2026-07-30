@@ -57,10 +57,13 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 Reference context:
 {context}
 
-Output exactly 6 numbered sections:
+Start with this section:
 
 0. FRAME TYPE
 [Write exactly "SLIDE" for a lecture slide, handwritten teaching page, whiteboard, or other frame whose main content is instructional. Write exactly "NON-SLIDE" for a desktop, file browser, document chooser, menu, dialog, recording control, loading screen, blank screen, or a teaching page substantially obscured by operating-system UI.]
+
+If the frame type is NON-SLIDE, stop immediately after the word NON-SLIDE.
+If the frame type is SLIDE, continue with all five reconstruction sections:
 
 1. TITLE
 [Exact title text if available. Otherwise give a concise inferred title.]
