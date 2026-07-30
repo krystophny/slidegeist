@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TypedDict
@@ -135,6 +136,26 @@ def _split_audio_chunks(
     return chunks
 
 
+def _chunk_start_offsets(chunks: list[Path]) -> list[float]:
+    """Measure cumulative PCM sample time instead of assuming exact segment cuts."""
+    offsets = []
+    offset = 0.0
+    for chunk in chunks:
+        offsets.append(offset)
+        try:
+            with wave.open(str(chunk), "rb") as stream:
+                frame_rate = stream.getframerate()
+                duration = stream.getnframes() / frame_rate
+        except (OSError, EOFError, wave.Error, ZeroDivisionError):
+            logger.warning(
+                "Could not measure %s; falling back to nominal chunk duration",
+                chunk,
+            )
+            duration = float(CHUNK_DURATION_S)
+        offset += duration
+    return offsets
+
+
 def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
@@ -171,8 +192,9 @@ def transcribe_video(
         all_segments: list[Segment] = []
         detected_language = "unknown"
 
-        for idx, chunk_path in enumerate(chunks):
-            offset = idx * CHUNK_DURATION_S
+        for idx, (chunk_path, offset) in enumerate(
+            zip(chunks, _chunk_start_offsets(chunks), strict=True)
+        ):
             logger.info(
                 "Transcribing chunk %d/%d (offset %.0fs) with model %s",
                 idx + 1,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ import pytest
 from PIL import Image
 
 from slidegeist import services
-from slidegeist.transcribe import transcribe_video
+from slidegeist.transcribe import _chunk_start_offsets, transcribe_video
 
 
 def test_llama_completion_sends_image_and_configured_model(
@@ -99,3 +100,15 @@ def test_transcription_refuses_partial_chunk_result(
 
     with pytest.raises(RuntimeError, match="refusing to publish a partial transcript"):
         transcribe_video(video)
+
+
+def test_transcript_chunk_offsets_follow_pcm_sample_counts(tmp_path: Path) -> None:
+    chunks = [tmp_path / "first.wav", tmp_path / "second.wav"]
+    for path, frames in zip(chunks, (20_000, 8_000), strict=True):
+        with wave.open(str(path), "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(16_000)
+            stream.writeframes(b"\0\0" * frames)
+
+    assert _chunk_start_offsets(chunks) == [0.0, 1.25]
