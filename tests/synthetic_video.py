@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -68,3 +69,90 @@ def make_slide_video(
             writer.write(frame)
     finally:
         writer.release()
+
+
+def make_vfr_slide_video(path: Path, transitions: list[float]) -> None:
+    """Write a sparse VFR lecture fixture with known presentation-time changes."""
+    if len(transitions) != 2:
+        raise ValueError("VFR oracle expects exactly two transitions")
+
+    frame_paths = []
+    palette = [(245, 245, 245), (210, 240, 250), (245, 215, 235)]
+    for index in range(3):
+        frame = np.full((360, 640, 3), palette[index], dtype=np.uint8)
+        cv2.rectangle(frame, (24, 20), (616, 334), (80, 80, 80), 2)
+        cv2.putText(
+            frame,
+            f"VFR SLIDE {index + 1}",
+            (48, 82),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.3,
+            (15, 15, 15),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.rectangle(
+            frame,
+            (80 + index * 120, 145),
+            (360 + index * 90, 290),
+            (40 + index * 60, 70, 180 - index * 50),
+            -1,
+        )
+        frame_path = path.parent / f"vfr-{index}.png"
+        if not cv2.imwrite(str(frame_path), frame):
+            raise RuntimeError(f"Could not write VFR fixture frame: {frame_path}")
+        frame_paths.append(frame_path)
+
+    timestamps = [
+        0.0,
+        0.2,
+        0.52,
+        1.0,
+        transitions[0],
+        2.0,
+        2.52,
+        3.0,
+        3.52,
+        4.0,
+        4.52,
+        5.0,
+        transitions[1],
+        6.0,
+        6.52,
+    ]
+    concat = path.parent / "vfr-frames.txt"
+    lines = []
+    selected_frames = [
+        frame_paths[sum(timestamp >= transition for transition in transitions)]
+        for timestamp in timestamps
+    ]
+    durations = [
+        next_timestamp - timestamp
+        for timestamp, next_timestamp in zip(timestamps, timestamps[1:], strict=False)
+    ]
+    durations.append(0.5)
+    for frame_path, duration in zip(selected_frames, durations, strict=True):
+        lines.extend([f"file '{frame_path.name}'", f"duration {duration}"])
+    lines.append(f"file '{selected_frames[-1].name}'")
+    concat.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat),
+            "-fps_mode",
+            "vfr",
+            "-c:v",
+            "ffv1",
+            "-y",
+            str(path),
+        ],
+        check=True,
+    )

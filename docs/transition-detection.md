@@ -25,11 +25,12 @@ official implementations:
   differences and its adaptive detector is preferred over a single global
   threshold:
   <https://github.com/Breakthrough/PySceneDetect/blob/main/scenedetect/detectors/content_detector.py>.
+- PySceneDetect 0.7's source-time overhaul confirms that presentation
+  timestamps, not average-frame-rate arithmetic, are required for correct VFR
+  boundaries:
+  <https://github.com/Breakthrough/PySceneDetect/releases/tag/v0.7>.
 - Adams and MacKay provide the probabilistic foundation for cadence-free
-  change-point inference: <https://arxiv.org/abs/0710.3742>. A 2026
-  lecture-video method combines visual embeddings with Bayesian online change
-  points, reinforcing the direction while requiring a much heavier runtime:
-  <https://doi.org/10.1016/j.procs.2026.06.556>.
+  change-point inference: <https://arxiv.org/abs/0710.3742>.
 
 The lightweight ensemble uses local SSIM dissimilarity, perceptual-hash
 distance, HSV-histogram distance, edge change, changed-tile coverage, and mean
@@ -43,6 +44,17 @@ better than a pixel threshold while retaining colour-dominant slide changes.
 Local peak selection merges multiple samples from one transition; the
 minimum-segment setting is only a duplicate-suppression window.
 
+FFmpeg selects the source-presentation-time evidence grid and downsizes those
+frames before piping them to Python. Source presentation timestamps, rather
+than average-FPS arithmetic, preserve correct boundaries for variable-frame-
+rate material without moving every decoded full-resolution frame through
+OpenCV.
+On the retained 2,543-second real regression lecture, the sampler reproduced
+all 70 prior transition bursts in 117.1 seconds (real-time factor 0.046),
+versus about 51 minutes for the full-resolution Python decode path. Only two
+selected peaks moved, each by one 0.48-second sample within the same transition
+burst.
+
 Speech pauses and audio are not used as transition evidence. They correlate
 too weakly with slide changes and can fail completely in silent or edited
 material. Transcript timestamps remain useful after visual segmentation.
@@ -51,9 +63,10 @@ material. Transcript timestamps remain useful after visual segmentation.
 
 `tests/test_transition_detector.py` generates videos with known, irregular
 transition times, a moving presenter-like occluder, and a full-frame
-luminance flash. Tests require every oracle transition within 0.65 seconds
-and no false positive at the flash. This is independent behavioral ground
-truth, not a check that repository state matches the patch.
+luminance flash. A separate sparse VFR fixture has known presentation-time
+changes. Tests require every oracle transition within the stated tolerance and
+no false positive at the flash. This is independent behavioral ground truth,
+not a check that repository state matches the patch.
 
 Run the benchmark:
 

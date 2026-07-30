@@ -8,7 +8,10 @@ colour, edge, perceptual, and spatial-coverage evidence, and keeps local peaks.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+import subprocess
+import tempfile
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -51,18 +54,6 @@ class TransitionAnalysis:
             "thresholds": self.thresholds,
             "evidence": [asdict(item) for item in self.evidence],
         }
-
-
-def _resize(frame: np.ndarray, max_width: int) -> np.ndarray:
-    height, width = frame.shape[:2]
-    if width <= max_width:
-        return frame
-    scale = max_width / width
-    return cv2.resize(
-        frame,
-        (max_width, max(2, round(height * scale))),
-        interpolation=cv2.INTER_AREA,
-    )
 
 
 def _ssim_loss(previous: np.ndarray, current: np.ndarray) -> float:
@@ -114,7 +105,7 @@ def _phash(gray: np.ndarray) -> np.ndarray:
     small = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
     coefficients = cv2.dct(small.astype(np.float32))[:8, :8]
     usable = coefficients.flatten()[1:]
-    return usable > np.median(usable)
+    return np.asarray(usable > np.median(usable), dtype=np.bool_)
 
 
 def _coverage_and_luminance(previous: np.ndarray, current: np.ndarray) -> tuple[float, float]:
@@ -230,6 +221,106 @@ def _select_peaks(evidence: list[FrameEvidence], min_scene_len: float) -> list[f
     return [max(group, key=lambda item: item.score).timestamp for group in groups]
 
 
+def _read_exact(stream: Any, size: int) -> bytes:
+    """Read one fixed-size raw frame from a pipe."""
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = stream.read(size - len(chunks))
+        if not chunk:
+            break
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def _sampled_frames(
+    video_path: Path,
+    *,
+    start_offset: float,
+    sample_interval: float,
+    max_width: int,
+    source_width: int,
+    source_height: int,
+    timestamps: list[float],
+) -> Iterator[np.ndarray]:
+    """Yield resized frames directly from FFmpeg at the requested sample rate.
+
+    Sampling in FFmpeg avoids transferring every full-resolution decoded frame
+    through Python. Selection uses source presentation times, so variable-frame-
+    rate inputs remain a regular temporal evidence grid. This is not a cadence
+    prior.
+    """
+    output_width = min(max_width, source_width)
+    output_height = max(
+        2,
+        round((source_height * output_width / source_width) / 2) * 2,
+    )
+    frame_bytes = output_width * output_height * 3
+    start = format(start_offset, ".12g")
+    interval = format(sample_interval, ".12g")
+    select = f"select=gte(t\\,{start}+selected_n*{interval})"
+    stats_file = tempfile.NamedTemporaryFile(prefix="slidegeist-pts-", delete=False)
+    stats_path = Path(stats_file.name)
+    stats_file.close()
+    try:
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(video_path),
+            "-vf",
+            f"{select},scale={output_width}:{output_height}:flags=area",
+            "-an",
+            "-fps_mode",
+            "vfr",
+            "-stats_enc_pre:v:0",
+            str(stats_path),
+            "-stats_enc_pre_fmt:v:0",
+            "{ti}",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "pipe:1",
+        ]
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        try:
+            while True:
+                raw = _read_exact(process.stdout, frame_bytes)
+                if not raw:
+                    break
+                if len(raw) != frame_bytes:
+                    raise RuntimeError(
+                        f"FFmpeg returned a partial sampled frame ({len(raw)}/{frame_bytes} bytes)"
+                    )
+                yield np.frombuffer(raw, dtype=np.uint8).reshape(
+                    output_height,
+                    output_width,
+                    3,
+                )
+        finally:
+            process.stdout.close()
+            stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+            return_code = process.wait()
+            process.stderr.close()
+            if return_code:
+                raise RuntimeError(f"FFmpeg sampled-frame decode failed: {stderr}")
+        timestamps.extend(
+            float(line)
+            for line in stats_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+    finally:
+        stats_path.unlink(missing_ok=True)
+
+
 def analyze_slide_transitions(
     video_path: Path,
     *,
@@ -252,33 +343,41 @@ def analyze_slide_transitions(
         raise RuntimeError(f"Failed to open video: {video_path}")
 
     fps = float(capture.get(cv2.CAP_PROP_FPS))
+    source_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    source_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    capture.release()
     if fps <= 0:
-        capture.release()
-        raise RuntimeError(f"Video reports invalid FPS: {fps}")
-    frame_step = max(1, round(sample_interval * fps))
-    sample_interval = frame_step / fps
-    start_frame = max(0, round(start_offset * fps))
-    total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        raise RuntimeError(f"Video reports invalid nominal FPS: {fps}")
+    if source_width <= 0 or source_height <= 0:
+        raise RuntimeError(f"Video reports invalid dimensions: {source_width}x{source_height}")
+    sample_interval = max(1, round(sample_interval * fps)) / fps
+
     evidence: list[FrameEvidence] = []
     previous: np.ndarray | None = None
+    timestamps: list[float] = []
 
-    try:
-        capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        frame_index = start_frame
-        next_sample = start_frame
-        while frame_index < total_frames and capture.grab():
-            if frame_index >= next_sample:
-                ok, frame = capture.retrieve()
-                if not ok:
-                    break
-                current = _resize(frame, max_width)
-                if previous is not None:
-                    evidence.append(_raw_evidence(previous, current, frame_index / fps))
-                previous = current
-                next_sample += frame_step
-            frame_index += 1
-    finally:
-        capture.release()
+    for current in _sampled_frames(
+        video_path,
+        start_offset=start_offset,
+        sample_interval=sample_interval,
+        max_width=max_width,
+        source_width=source_width,
+        source_height=source_height,
+        timestamps=timestamps,
+    ):
+        if previous is not None:
+            evidence.append(_raw_evidence(previous, current, 0.0))
+        previous = current
+
+    if len(timestamps) != len(evidence) + bool(previous is not None):
+        raise RuntimeError(
+            "FFmpeg timestamp/frame count mismatch: "
+            f"{len(timestamps)} timestamps for {len(evidence) + bool(previous is not None)} frames"
+        )
+    evidence = [
+        replace(item, timestamp=timestamp)
+        for item, timestamp in zip(evidence, timestamps[1:], strict=True)
+    ]
 
     threshold_bias = float(np.clip((threshold - 0.025) * 8.0, -0.18, 0.30))
     scored, thresholds = _score_evidence(evidence, threshold_bias)
