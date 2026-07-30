@@ -34,7 +34,7 @@ def get_system_instruction() -> str:
     """Return the system instruction used for slide reconstruction prompts."""
     return (
         "You reconstruct academic and scientific slides from the image and text context. "
-        "Prioritize completeness and accuracy over brevity. "
+        "Be concise without omitting visible content needed for reconstruction. "
         "Treat the image as primary visual evidence and OCR/transcript as supporting context. "
         "If a detail cannot be recovered from context, write Unclear instead of inventing it."
     )
@@ -64,6 +64,8 @@ Start with this section:
 
 If the frame type is NON-SLIDE, stop immediately after the word NON-SLIDE.
 If the frame type is SLIDE, continue with all five reconstruction sections:
+Use compact fragments, quote each visible item once, and do not repeat TEXT CONTENT in
+VISUAL ELEMENTS or LAYOUT. Aim for at most 200 words unless additional formulas require more.
 
 1. TITLE
 [Exact title text if available. Otherwise give a concise inferred title.]

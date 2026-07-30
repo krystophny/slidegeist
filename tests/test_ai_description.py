@@ -27,3 +27,5 @@ def test_prompt_defines_non_instructional_ui_as_non_slide() -> None:
     assert "substantially obscured by operating-system UI" in prompt
     assert "stop immediately after the word NON-SLIDE" in prompt
     assert "If the frame type is SLIDE, continue" in prompt
+    assert "Aim for at most 200 words" in prompt
+    assert "do not repeat TEXT CONTENT" in prompt
