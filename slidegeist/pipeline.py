@@ -244,12 +244,14 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
         # A partial incremental run is resumable, not complete. Require one
         # non-empty description section per extracted slide.
         from slidegeist.export import _parse_existing_markdown
+        from slidegeist.frame_filter import is_non_slide_description
 
         slide_count = len(load_existing_slide_metadata(output_dir))
         described_count = sum(
             1
             for data in _parse_existing_markdown(markdown_path).values()
             if data.get("ai_description", "").strip()
+            and not is_non_slide_description(data["ai_description"])
         )
         stages["ai_description"] = slide_count > 0 and described_count == slide_count
 
@@ -555,6 +557,7 @@ def process_video(
         try:
             from slidegeist.ai_description import build_ai_describer
             from slidegeist.export import run_ai_descriptions
+            from slidegeist.frame_filter import filter_non_slide_states
 
             describer = build_ai_describer()
             logger.info(f"Using {describer.name} for AI descriptions")
@@ -568,6 +571,12 @@ def process_video(
                 output_path=markdown_path,
                 force_redo=force_redo_ai,
             )
+            slide_metadata = filter_non_slide_states(
+                slide_metadata,
+                ai_descriptions,
+                output_dir / "transition_detection.json",
+            )
+            results["slides"] = [path for _, _, _, path in slide_metadata]
             export_slides_json(
                 video_path,
                 slide_metadata,

@@ -63,6 +63,23 @@ Speech pauses and audio are not used as transition evidence. They correlate
 too weakly with slide changes and can fail completely in silent or edited
 material. Transcript timestamps remain useful after visual segmentation.
 
+## Instructional-state filtering
+
+Visual change detection intentionally reports every supported state change; a
+desktop, file browser, recording control, or operating-system dialog can
+therefore be a genuine detected state without being a lecture slide. During
+the existing multimodal description pass, Slidegeist classifies each extracted
+state as `SLIDE` or `NON-SLIDE`. Rejected states are removed from the deck,
+their time span is merged into the neighboring instructional interval, and
+their classification plus image hash is retained in
+`transition_detection.json`. The raw detector boundaries remain under
+`raw_timestamps`, so this semantic filtering is reversible and auditable.
+
+This second stage uses visual content rather than cadence or an expected slide
+count. Handwritten pages and whiteboards explicitly count as instructional;
+desktops, file choosers, menus, loading screens, recording controls, and pages
+substantially obscured by operating-system UI do not.
+
 ## Reproducible acceptance oracle
 
 `tests/test_transition_detector.py` generates videos with known, irregular

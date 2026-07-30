@@ -115,6 +115,11 @@ The main `process_video()` function orchestrates processing with smart resume ca
 
 5. **AI Slide Description** (`ai_description.py` + `services.llama_cpp_complete`): Sends the slide image with OCR text and the transcript window to a multimodal llama.cpp server. `SLIDEGEIST_LLAMACPP_MODEL` can select a model explicitly; otherwise the first `/v1/models` entry is used. Oversized images are reduced only in the HTTP request to avoid spending vision-token compute on pixels beyond normal slide-reading resolution.
 
+   The same response classifies the visual state. Desktop navigation, file
+   browsers, dialogs, recording controls, loading screens, and teaching pages
+   obscured by operating-system UI are excluded from the deck. Raw boundaries,
+   rejection reasons, and frame hashes remain in `transition_detection.json`.
+
 6. **Export** (`export.py`): Generates Markdown with YAML front matter.
    - Default: single `slides.md` with table of contents (LLM-friendly).
    - Split mode (`--split`): separate files per slide with `index.md`.

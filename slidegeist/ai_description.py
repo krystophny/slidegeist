@@ -52,12 +52,15 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
-    return f"""Describe this slide so another AI can reconstruct it from the available text context.
+    return f"""Classify this frame, then describe it so another AI can reconstruct it.
 
 Reference context:
 {context}
 
-Output exactly 5 numbered sections:
+Output exactly 6 numbered sections:
+
+0. FRAME TYPE
+[Write exactly "SLIDE" for a lecture slide, handwritten teaching page, whiteboard, or other frame whose main content is instructional. Write exactly "NON-SLIDE" for a desktop, file browser, document chooser, menu, dialog, recording control, loading screen, blank screen, or a teaching page substantially obscured by operating-system UI.]
 
 1. TITLE
 [Exact title text if available. Otherwise give a concise inferred title.]

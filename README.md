@@ -4,6 +4,7 @@
 
 - **Transition detection** using an adaptive visual-evidence ensemble without slide-cadence assumptions
 - **Automatic slide extraction** with simple numbered filenames (slide_001, slide_002, ...)
+- **Instructional-state filtering** that excludes desktop/navigation/recording UI with auditable hashes
 - **Audio transcription** through a running OpenAI-compatible Whisper service
 - **Markdown export** - single `slides.md` file (LLM-friendly) or split mode with separate files
 - **OCR** with Tesseract
