@@ -171,6 +171,7 @@ def export_slides_json(
     source_url: str | None = None,
     split_slides: bool = False,
     ai_descriptions: dict[str, str] | None = None,
+    run_ocr: bool = True,
 ) -> None:
     """Export slides as Markdown file(s).
 
@@ -189,12 +190,13 @@ def export_slides_json(
         split_slides: If True, create separate files (index.md + slide_NNN.md).
                      If False (default), create single slides.md file.
         ai_descriptions: Optional dict mapping slide_id to AI description.
+        run_ocr: Whether to run OCR while building this export.
     """
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Build default OCR pipeline if none provided
-    if ocr_pipeline is None:
+    if run_ocr and ocr_pipeline is None:
         from slidegeist.ocr import build_default_ocr_pipeline
 
         ocr_pipeline = build_default_ocr_pipeline()
@@ -216,7 +218,12 @@ def export_slides_json(
     total_slides = len(slide_metadata)
 
     for index, (slide_index, t_start, t_end, image_path) in enumerate(
-        tqdm(slide_metadata, desc="Processing slides", unit="slide", disable=not ocr_pipeline)
+        tqdm(
+            slide_metadata,
+            desc="Processing slides",
+            unit="slide",
+            disable=not run_ocr or not ocr_pipeline,
+        )
     ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
         image_filename = image_path.name
@@ -232,7 +239,8 @@ def export_slides_json(
 
         # OCR: run if available, else keep existing
         ocr_available = (
-            ocr_pipeline is not None
+            run_ocr
+            and ocr_pipeline is not None
             and ocr_pipeline._primary is not None  # type: ignore[union-attr]
             and ocr_pipeline._primary.is_available  # type: ignore[union-attr]
         )

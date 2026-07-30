@@ -494,6 +494,7 @@ def process_video(
             ocr_pipeline=ocr_pipeline,
             source_url=source_url,
             split_slides=split_slides,
+            run_ocr=False,
         )
         results["slides_md"] = markdown_path
 
@@ -539,7 +540,7 @@ def process_video(
             error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)
-            # Continue without transcription
+            raise RuntimeError(error_msg) from exc
     elif completed_stages["transcription"]:
         logger.info("=" * 60)
         logger.info("STEP 3: Transcription already completed (skipping)")
@@ -658,6 +659,7 @@ def process_video(
             logger.error(error_msg)
             logger.error("=" * 60)
             mark_stage_failed(output_dir, "ai_description", error_msg)
+            raise RuntimeError(error_msg) from exc
 
     elif completed_stages["ai_description"]:
         logger.info("=" * 60)

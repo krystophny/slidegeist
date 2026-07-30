@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import slidegeist.pipeline as pipeline
 from slidegeist.pipeline import (
     detect_completed_stages,
     load_existing_slide_metadata,
@@ -213,3 +214,26 @@ def test_unretried_failed_stage_returns_a_processing_error(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError, match="failed stages: ai_description"):
         process_video(video, tmp_path)
+
+
+def test_transcription_failure_stops_before_downstream_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "known.mp4"
+    video.write_bytes(b"known video placeholder")
+    _write_slide(tmp_path, 1)
+    (tmp_path / "slides.md").write_text(_section(1), encoding="utf-8")
+
+    def fail_transcription(*_: object, **__: object) -> object:
+        raise RuntimeError("independent transcription failure")
+
+    def unexpected_export(*_: object, **__: object) -> None:
+        pytest.fail("pipeline continued after required transcription failure")
+
+    monkeypatch.setattr(pipeline, "transcribe_video", fail_transcription)
+    monkeypatch.setattr(pipeline, "export_slides_json", unexpected_export)
+
+    with pytest.raises(RuntimeError, match="independent transcription failure"):
+        process_video(video, tmp_path)
+
+    assert (tmp_path / ".transcription_failed").exists()

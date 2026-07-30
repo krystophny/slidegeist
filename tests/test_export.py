@@ -4,6 +4,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from slidegeist.export import (
     _parse_existing_markdown,
@@ -158,6 +159,34 @@ def test_export_slides_empty_metadata(tmp_path: Path) -> None:
     # No slide markdown files in root (split mode with no slides)
     md_files = list(tmp_path.glob("slide_*.md"))
     assert len(md_files) == 0
+
+
+def test_checkpoint_export_does_not_invoke_ocr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slides = tmp_path / "slides"
+    slides.mkdir()
+    image = slides / "slide_001.jpg"
+    _make_image(image, 255)
+
+    def unexpected_ocr_build() -> None:
+        pytest.fail("checkpoint export invoked OCR")
+
+    monkeypatch.setattr(
+        "slidegeist.ocr.build_default_ocr_pipeline", unexpected_ocr_build
+    )
+
+    output = tmp_path / "slides.md"
+    export_slides_json(
+        Path("/known/video.mp4"),
+        [(1, 0.0, 10.0, image)],
+        [],
+        output,
+        run_ocr=False,
+    )
+
+    assert "slides/slide_001.jpg" in output.read_text()
+    assert "OCR Text" not in output.read_text()
 
 
 def test_split_description_checkpoint_is_parsed_and_replaced(
