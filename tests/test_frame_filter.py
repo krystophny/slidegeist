@@ -60,8 +60,11 @@ def test_non_slide_state_is_removed_and_neighboring_intervals_merge(
 def test_frame_type_parser_requires_an_unambiguous_structured_decision() -> None:
     assert is_non_slide_description(_description("NON-SLIDE"))
     assert frame_type(_description("SLIDE")) == "SLIDE"
+    assert frame_type("SLIDE\n\n1. TITLE\n8.1 Fusion in a Test Tube?") == "SLIDE"
+    assert frame_type("NON_SLIDE\n\n1. TITLE\nDesktop") == "NON-SLIDE"
     assert frame_type("1. TITLE\nLegacy accepted slide") is None
     assert frame_type(_description("SLIDE") + "\n" + _description("NON-SLIDE")) is None
+    assert frame_type("SLIDE\n\n" + _description("NON-SLIDE")) is None
 
 
 def test_filter_rejects_a_description_without_frame_type(tmp_path: Path) -> None:

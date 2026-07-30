@@ -22,6 +22,10 @@ def frame_type(description: str) -> str | None:
         match.group(1).upper().replace("_", "-").replace(" ", "-")
         for match in _FRAME_TYPE.finditer(description)
     }
+    first_line = description.lstrip().partition("\n")[0].strip()
+    leading_type = first_line.upper().replace("_", "-").replace(" ", "-")
+    if leading_type in {"SLIDE", "NON-SLIDE"}:
+        matches.add(leading_type)
     return matches.pop() if len(matches) == 1 else None
 
 
