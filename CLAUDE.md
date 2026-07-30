@@ -44,10 +44,12 @@ Slidegeist talks to two locally hosted OpenAI-compatible HTTP endpoints. Both mu
 
 | Service         | Default URL              | Env override                  | Purpose                                  |
 |-----------------|--------------------------|-------------------------------|------------------------------------------|
-| llama.cpp       | `http://127.0.0.1:8081`  | `SLIDEGEIST_LLAMACPP_URL`     | Text completions (slide descriptions)    |
+| llama.cpp       | `http://127.0.0.1:8081`  | `SLIDEGEIST_LLAMACPP_URL`     | Multimodal slide descriptions            |
 | Whisper server  | `http://127.0.0.1:8427`  | `SLIDEGEIST_WHISPER_URL`      | OpenAI-compatible audio transcription    |
 
-All HTTP is implemented in `slidegeist/services.py` using the stdlib only. Health probes hit `/health` on llama.cpp and `/v1/audio/transcriptions` on the Whisper server.
+All HTTP is implemented in `slidegeist/services.py` using the stdlib only.
+Health probes hit `/health` first; Whisper falls back to probing
+`/v1/audio/transcriptions` for compatible servers without a health route.
 
 ### Recommended Whisper server: whisper.cpp
 
@@ -94,10 +96,10 @@ The main `process_video()` function orchestrates processing with smart resume ca
 
 **Processing Steps**:
 
-1. **Scene Detection** (`ffmpeg_scene.py`): Uses FFmpeg's SAD-based scene filter with Opencast-style optimization.
-   - Iteratively adjusts threshold to target ~30 segments/hour (typical lecture pace).
-   - Merges segments shorter than 2 seconds to filter out rapid flickers.
-   - `--scene-threshold` serves as the optimizer's starting point.
+1. **Transition Detection** (`transition_detector.py`): Fuses SSIM-like structure, perceptual hash, HSV histogram, edges, and spatial coverage.
+   - Robust per-video baselines replace cadence assumptions.
+   - `--scene-threshold` is a bounded sensitivity bias, never a count target.
+   - `transition_detection.json` records evidence and thresholds.
 
 2. **Slide Extraction** (`slides.py`): Extracts frames at 80% through each detected segment.
    - Simple numbered filenames: `slide_001.jpg`, `slide_002.jpg`, ...
@@ -105,9 +107,9 @@ The main `process_video()` function orchestrates processing with smart resume ca
 
 3. **Transcription** (`transcribe.py` + `services.whisper_transcribe`): Extracts mono 16 kHz WAV, splits into 120 s chunks to stay within server upload limits, POSTs each chunk to `/v1/audio/transcriptions` with `verbose_json`, and reassembles segments/words with offset-corrected timestamps.
 
-4. **OCR** (`ocr.py`): Tesseract only (`eng+deu`, PSM 1). There is no image-based refinement stage; the only AI step is the text-only describer in (5).
+4. **OCR** (`ocr.py`): Tesseract only (`eng+deu`, PSM 1). The OCR result is supporting context for the multimodal describer in (5).
 
-5. **AI Slide Description** (`ai_description.py` + `services.llama_cpp_complete`): Builds a prompt from OCR text plus the slide's transcript window and asks the llama.cpp server to produce a 5-section structured description. The model label is read from `/v1/models` on the server, not hardcoded. Images are not sent — the describer is deliberately text-only.
+5. **AI Slide Description** (`ai_description.py` + `services.llama_cpp_complete`): Sends the slide image with OCR text and the transcript window to a multimodal llama.cpp server. `SLIDEGEIST_LLAMACPP_MODEL` can select a model explicitly; otherwise the first `/v1/models` entry is used.
 
 6. **Export** (`export.py`): Generates Markdown with YAML front matter.
    - Default: single `slides.md` with table of contents (LLM-friendly).
@@ -115,18 +117,18 @@ The main `process_video()` function orchestrates processing with smart resume ca
 
 ### Key Design Decisions
 
-- **Opencast compatibility**: Scene detection threshold and optimization mirror Opencast's VideoSegmenterService implementation.
+- **Cadence-free detection**: visual evidence decides the count; expected slides/time is never a hard limit or stopping condition.
 - **Out-of-process inference**: All model compute lives in external services. The package has no torch/transformers/faster-whisper/MLX dependency.
-- **Research-based defaults**: Scene threshold (0.025), target segments/hour (30), minimum segment length (2 s) are based on Opencast research.
+- **Research-based evidence**: see `docs/transition-detection.md` and the behavioral oracle benchmark.
 - **Minimal dependencies**: Core runtime is FFmpeg, Tesseract, numpy, opencv-python, yt-dlp, Pillow, tqdm, psutil.
 
 ### Scene Detection Implementation
 
 Two complementary implementations exist:
 
-1. **ffmpeg_scene.py** (default): FFmpeg's built-in scene filter with the Opencast optimizer. SAD (Sum of Absolute Differences) metric. Exposes `detect_scenes_ffmpeg()` and `merge_short_segments()`.
+1. **transition_detector.py** (default): robust multimodal visual evidence and local peak selection.
 
-2. **pixel_diff_detector.py** (research/experimental): Custom detector supporting SAD, z-score (rolling window), and histogram methods. Used by `scripts/plot_threshold_sweep.py` for tuning; not used in the main CLI pipeline. Kept in-package so tests and the plotting script can import it.
+2. **ffmpeg_scene.py** and **pixel_diff_detector.py** (legacy/experimental): retained for comparison and threshold-sweep research.
 
 ## Testing Strategy
 
@@ -153,10 +155,10 @@ GitHub Actions automatically builds and publishes to PyPI on tag push.
 ## Important Constants (constants.py)
 
 - `DEFAULT_SCENE_THRESHOLD = 0.025`: FFmpeg scene filter threshold (0–1 scale).
-- `DEFAULT_MIN_SCENE_LEN = 2.0`: Minimum segment duration (seconds).
+- `DEFAULT_MIN_SCENE_LEN = 0.75`: Transition-burst refractory period (seconds), not a slide-duration prior.
 - `DEFAULT_START_OFFSET = 3.0`: Skip first N seconds to avoid setup noise.
-- `DEFAULT_SEGMENTS_PER_HOUR = 30`: Opencast optimizer target.
-- `DEFAULT_WHISPER_MODEL = "large-v3"`: Model name passed to the Whisper server.
+- `DEFAULT_SEGMENTS_PER_HOUR = 30`: legacy experimental Opencast detector only.
+- `DEFAULT_WHISPER_MODEL = "large-v3-turbo"`: Model name passed to the Whisper server.
 - `DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"`
 - `DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"`
 

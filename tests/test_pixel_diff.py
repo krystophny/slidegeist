@@ -31,7 +31,7 @@ def test_detect_slides_pixel_diff_fallbacks_to_default_fps(tmp_path: Path, monke
         def release(self) -> None:
             return None
 
-        def isOpened(self) -> bool:
+        def isOpened(self) -> bool:  # noqa: N802 - mirrors cv2.VideoCapture
             return True
 
         def set(self, *_: Any, **__: Any) -> None:

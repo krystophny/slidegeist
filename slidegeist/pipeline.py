@@ -1,5 +1,6 @@
 """Main processing pipeline orchestration."""
 
+import json
 import logging
 from pathlib import Path
 
@@ -159,6 +160,13 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
 
     # Check for slides directory
     stages["slides"] = has_existing_slides(output_dir)
+    transcript_path = output_dir / "transcript.json"
+    if transcript_path.exists():
+        try:
+            transcript_payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+            stages["transcription"] = bool(transcript_payload.get("segments"))
+        except (OSError, ValueError, AttributeError):
+            logger.debug("Ignoring invalid transcript checkpoint: %s", transcript_path)
 
     # Check markdown files for content
     markdown_path = output_dir / "slides.md"
@@ -198,9 +206,17 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
         if "OCR Text" in content:
             stages["ocr"] = True
 
-        # Detect AI descriptions: look for "### AI Description" sections
-        if "AI Description" in content:
-            stages["ai_description"] = True
+        # A partial incremental run is resumable, not complete. Require one
+        # non-empty description section per extracted slide.
+        from slidegeist.export import _parse_existing_markdown
+
+        slide_count = len(load_existing_slide_metadata(output_dir))
+        described_count = sum(
+            1
+            for data in _parse_existing_markdown(markdown_path).values()
+            if data.get("ai_description", "").strip()
+        )
+        stages["ai_description"] = slide_count > 0 and described_count == slide_count
 
     except Exception as e:
         logger.debug(f"Could not parse markdown for stage detection: {e}")
@@ -359,6 +375,7 @@ def process_video(
             threshold=scene_threshold,
             min_scene_len=min_scene_len,
             start_offset=start_offset,
+            diagnostics_path=output_dir / "transition_detection.json",
         )
 
         if not scene_timestamps:
@@ -403,6 +420,21 @@ def process_video(
         try:
             transcript_data = transcribe_video(video_path, model_size=model)
             transcript_segments = transcript_data["segments"]
+            transcript_path = output_dir / "transcript.json"
+            transcript_path.write_text(
+                json.dumps(
+                    {
+                        "model": model,
+                        "language": transcript_data["language"],
+                        "segments": transcript_segments,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            results["transcript_json"] = transcript_path
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"

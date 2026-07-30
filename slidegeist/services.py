@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import mimetypes
@@ -9,7 +10,7 @@ import os
 import re
 import uuid
 from functools import lru_cache
-from http.client import HTTPConnection, HTTPSConnection, HTTPResponse
+from http.client import HTTPConnection, HTTPResponse, HTTPSConnection
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
@@ -27,6 +28,12 @@ def get_llama_cpp_url() -> str:
 def get_whisper_url() -> str:
     """Return the configured Whisper server base URL."""
     return os.getenv("SLIDEGEIST_WHISPER_URL", DEFAULT_WHISPER_URL).rstrip("/")
+
+
+def get_llama_cpp_model_override() -> str | None:
+    """Return an explicitly configured vision/text model id, if any."""
+    value = os.getenv("SLIDEGEIST_LLAMACPP_MODEL", "").strip()
+    return value or None
 
 
 def _http_json(
@@ -67,6 +74,8 @@ def is_llama_cpp_available(timeout: float = 2.0) -> bool:
 
 def is_whisper_available(timeout: float = 2.0) -> bool:
     """Check whether the configured Whisper transcription server is reachable."""
+    if _http_status(f"{get_whisper_url()}/health", timeout=timeout) == 200:
+        return True
     status = _http_status(f"{get_whisper_url()}/v1/audio/transcriptions", timeout=timeout)
     return status in {200, 405}
 
@@ -118,6 +127,7 @@ def _strip_reasoning(text: str) -> str:
 def llama_cpp_complete(
     prompt: str,
     *,
+    image_path: Path | None = None,
     max_tokens: int = 1024,
     temperature: float = 0.0,
     timeout: float = 180.0,
@@ -129,13 +139,25 @@ def llama_cpp_complete(
     Stripping <think>...</think> on the client side covers servers that
     ignore the kwarg.
     """
+    content: str | list[dict[str, Any]] = prompt
+    if image_path is not None:
+        mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        content = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
+            },
+        ]
+
     payload: dict[str, Any] = {
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": content}],
         "max_tokens": max_tokens,
         "temperature": temperature,
         "chat_template_kwargs": {"enable_thinking": False},
     }
-    model = get_llama_cpp_model()
+    model = get_llama_cpp_model_override() or get_llama_cpp_model()
     if model:
         payload["model"] = model
 
@@ -173,8 +195,8 @@ def _build_multipart_prefix(
     for key, value in fields:
         lines.extend(
             [
-                f"--{boundary}\r\n".encode("utf-8"),
-                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"),
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
                 value.encode("utf-8"),
                 b"\r\n",
             ]
@@ -183,17 +205,17 @@ def _build_multipart_prefix(
     mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
     lines.extend(
         [
-            f"--{boundary}\r\n".encode("utf-8"),
+            f"--{boundary}\r\n".encode(),
             (
                 f'Content-Disposition: form-data; name="{file_field}"; '
                 f'filename="{file_path.name}"\r\n'
-            ).encode("utf-8"),
-            f"Content-Type: {mime_type}\r\n\r\n".encode("utf-8"),
+            ).encode(),
+            f"Content-Type: {mime_type}\r\n\r\n".encode(),
         ]
     )
 
     prefix = b"".join(lines)
-    suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    suffix = f"\r\n--{boundary}--\r\n".encode()
     return prefix, suffix
 
 

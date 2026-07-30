@@ -22,9 +22,9 @@ def test_adaptive_detection_tugraz():
     timestamps = detect_slides_adaptive(video_path)
 
     num_slides = len(timestamps) + 1  # +1 because timestamps are transitions
-    print(f"\nAdaptive detection results:")
+    print("\nAdaptive detection results:")
     print(f"  Detected: {num_slides} slides")
-    print(f"  Expected: 15 slides")
+    print("  Expected: 15 slides")
     print(f"  Transitions: {timestamps}")
 
     # Should detect at least 15 slides (maybe a few more is OK)

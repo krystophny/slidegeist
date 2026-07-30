@@ -6,20 +6,25 @@ import logging
 import re
 from pathlib import Path
 
-from slidegeist.services import get_llama_cpp_model, llama_cpp_complete
+from slidegeist.services import (
+    get_llama_cpp_model,
+    get_llama_cpp_model_override,
+    llama_cpp_complete,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def clean_text(text: str) -> str:
     """Remove control artifacts and normalize spacing."""
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     valid_chars = set(
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "äöüßÄÖÜ"
         "àâéèêëïîôùûüÿçÀÂÉÈÊËÏÎÔÙÛÜŸÇ"
         "0123456789"
-        " .,;:!?()[]{}+-=*/<>|\\@#$%^&_~'\"`\n\t"
+        " .,;:!?()[]{}+-=*/<>|\\@#$%^&_~'\"`•\n\t"
     )
     cleaned = "".join(c for c in text if c in valid_chars or c.isalpha() or c.isdigit())
     return cleaned.strip()
@@ -28,10 +33,9 @@ def clean_text(text: str) -> str:
 def get_system_instruction() -> str:
     """Return the system instruction used for slide reconstruction prompts."""
     return (
-        "You reconstruct academic and scientific slides from text context. "
+        "You reconstruct academic and scientific slides from the image and text context. "
         "Prioritize completeness and accuracy over brevity. "
-        "You do not have direct image access. "
-        "Use only the supplied OCR and transcript context. "
+        "Treat the image as primary visual evidence and OCR/transcript as supporting context. "
         "If a detail cannot be recovered from context, write Unclear instead of inventing it."
     )
 
@@ -83,28 +87,23 @@ class BaseSlideDescriber:
 
 
 class LlamaCppSlideDescriber(BaseSlideDescriber):
-    """Slide describer backed by the local llama.cpp server."""
+    """Multimodal slide describer backed by an OpenAI-compatible llama.cpp server."""
 
     def __init__(
         self,
         max_new_tokens: int = 1536,
         temperature: float = 0.0,
     ) -> None:
-        model_id = get_llama_cpp_model() or "unknown"
+        model_id = get_llama_cpp_model_override() or get_llama_cpp_model() or "unknown"
         self.name = f"{model_id} (llama.cpp)"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 
     def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:
-        del image_path
-
-        if not transcript.strip() and not ocr_text.strip():
-            logger.debug("Skipping AI description because no transcript or OCR text is available")
-            return ""
-
         prompt = f"{get_system_instruction()}\n\n{get_user_prompt(transcript, ocr_text)}"
         response = llama_cpp_complete(
             prompt,
+            image_path=image_path,
             max_tokens=self.max_new_tokens,
             temperature=self.temperature,
         )

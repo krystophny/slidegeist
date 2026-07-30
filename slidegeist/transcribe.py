@@ -166,8 +166,10 @@ def transcribe_video(
             try:
                 payload = whisper_transcribe(chunk_path, model=model_size)
             except Exception as exc:
-                logger.warning("Chunk %d failed: %s — skipping", idx + 1, exc)
-                continue
+                raise RuntimeError(
+                    f"Whisper chunk {idx + 1}/{len(chunks)} failed; "
+                    "refusing to publish a partial transcript"
+                ) from exc
 
             chunk_result = _normalize_transcript(payload)
             if chunk_result["language"] != "unknown":

@@ -1,5 +1,6 @@
 """FFmpeg wrapper for video processing and scene detection."""
 
+import json
 import logging
 import shutil
 import subprocess
@@ -62,28 +63,20 @@ def detect_scenes(
     video_path: Path,
     threshold: float = DEFAULT_SCENE_THRESHOLD,
     min_scene_len: float = DEFAULT_MIN_SCENE_LEN,
-    start_offset: float = DEFAULT_START_OFFSET
+    start_offset: float = DEFAULT_START_OFFSET,
+    diagnostics_path: Path | None = None,
 ) -> list[float]:
-    """Detect slide changes using Opencast's FFmpeg-based optimization.
+    """Detect slide changes using complementary robust visual evidence.
 
-    Uses FFmpeg's scene filter (SAD-based) with iterative optimization to
-    achieve a target number of segments based on video duration. Matches
-    Opencast's video segmentation approach exactly.
-
-    Target: 30 segments per hour (research shows 15-45 slides/hour is typical)
-    Method: Iteratively adjusts threshold until segment count is within 25% of target
-
-    Based on: Opencast VideoSegmenterServiceImpl
-    (https://docs.opencast.org/r/4.x/admin/modules/videosegmentation/)
+    The detector fuses SSIM-like structural dissimilarity, perceptual hash,
+    HSV histogram, edge change, and spatial coverage. Per-video robust
+    baselines replace the former fixed slides/hour target, so timing is never
+    used to determine or cap the number of slides.
 
     Args:
         video_path: Path to the video file.
-        threshold: Initial scene detection threshold (0-1 scale, FFmpeg scene score).
-                  Lower = more sensitive. Opencast default: 0.025 (2.5%).
-                  This will be automatically adjusted during optimization.
-        min_scene_len: Minimum segment length in seconds (stability threshold).
-                      Segments shorter than this are merged with adjacent segments.
-                      Adapted from Opencast's 60s default to 2s for slide detection.
+        threshold: Sensitivity bias. Lower is more sensitive; 0.025 is neutral.
+        min_scene_len: Minimum separation between duplicate transition peaks.
         start_offset: Skip first N seconds to avoid mouse movement during setup.
 
     Returns:
@@ -95,37 +88,21 @@ def detect_scenes(
     if not video_path.exists():
         raise FFmpegError(f"Video file not found: {video_path}")
 
-    from slidegeist.constants import (
-        DEFAULT_MAX_CYCLES,
-        DEFAULT_MAX_ERROR,
-        DEFAULT_SEGMENTS_PER_HOUR,
-    )
-    from slidegeist.ffmpeg_scene import detect_scenes_opencast
+    from slidegeist.transition_detector import analyze_slide_transitions
 
-    # Get video duration to calculate target segments
-    video_duration = get_video_duration(video_path)
-    duration_hours = video_duration / 3600.0
-
-    # Calculate target segments based on duration (30 segments/hour)
-    target_segments = max(3, int(DEFAULT_SEGMENTS_PER_HOUR * duration_hours))
-
-    logger.info(
-        f"Video duration: {video_duration/60:.1f} min "
-        f"({duration_hours:.2f} hours), targeting {target_segments} segments"
-    )
-
-    # Run Opencast-style optimization
-    timestamps, final_threshold = detect_scenes_opencast(
+    analysis = analyze_slide_transitions(
         video_path,
-        target_segments=target_segments,
-        max_error=DEFAULT_MAX_ERROR,
-        max_cycles=DEFAULT_MAX_CYCLES,
-        initial_threshold=threshold,
-        stability_threshold=min_scene_len,
+        threshold=threshold,
+        min_scene_len=min_scene_len,
         start_offset=start_offset
     )
-
-    return timestamps
+    if diagnostics_path is not None:
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(analysis.as_dict(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return analysis.timestamps
 
 
 def extract_audio(

@@ -2,12 +2,12 @@
 
 ## Features
 
-- **Scene detection** using global pixel difference (research-based method optimized for lecture videos)
+- **Transition detection** using an adaptive visual-evidence ensemble without slide-cadence assumptions
 - **Automatic slide extraction** with simple numbered filenames (slide_001, slide_002, ...)
 - **Audio transcription** through a running OpenAI-compatible Whisper service
 - **Markdown export** - single `slides.md` file (LLM-friendly) or split mode with separate files
 - **OCR** with Tesseract
-- **AI descriptions** through a running `llama.cpp` service
+- **Multimodal AI descriptions** through a running OpenAI-compatible `llama.cpp` service
 
 ## Requirements
 
@@ -15,7 +15,7 @@
 - **FFmpeg** (must be installed separately and available in PATH)
 - **Whisper server** speaking the OpenAI `/v1/audio/transcriptions` API on `127.0.0.1:8427`
   (e.g. `whisper.cpp`'s `whisper-server`, faster-whisper-server, LocalAI, Vox-Box)
-- **llama.cpp** running a completion API on `127.0.0.1:8081`
+- **llama.cpp** running a multimodal chat-completion API on `127.0.0.1:8081`
 
 ### Installing FFmpeg
 
@@ -99,9 +99,8 @@ slidegeist video.mp4 --out my-output/
 # Use smaller/faster model
 slidegeist video.mp4 --model base
 
-# Adjust scene detection sensitivity (0.0-1.0, default 0.025).
-# Acts as the *starting point* for the Opencast optimizer.
-# Lower values bias toward more segments; higher values toward fewer.
+# Adjust transition sensitivity (0.0-1.0, default 0.025).
+# This only biases evidence sensitivity; it never targets a slide count.
 slidegeist video.mp4 --scene-threshold 0.015
 
 # Explicit process command (same as default)
@@ -125,11 +124,11 @@ Options:
   --out DIR              Output directory (default: video filename)
   --split               Create separate markdown files (index.md + slide_NNN.md)
                         instead of single slides.md (default: combined file)
-  --scene-threshold NUM  Initial scene detection sensitivity 0.0-1.0 (default: 0.025)
-                         Used as the optimizer's starting threshold; it will
-                         auto-adjust to reach a stable segment count.
-  --model NAME          Whisper model: tiny, base, small, medium, large, large-v2, large-v3
-                        (default: large-v3)
+  --scene-threshold NUM  Transition sensitivity bias 0.0-1.0 (default: 0.025).
+                         Lower is more sensitive; slide count is never targeted.
+  --model NAME          Whisper model: tiny, base, small, medium, large, large-v2,
+                        large-v3, large-v3-turbo
+                        (default: large-v3-turbo)
   --format FMT          Image format: jpg or png (default: jpg)
   -v, --verbose         Enable verbose logging
 ```
@@ -216,15 +215,15 @@ Introduction to Quantum Mechanics
 
 ## How It Works
 
-1. **Scene Detection**: Uses FFmpeg's scene filter (SAD-based) with an Opencast-style optimizer to identify slide changes
-   - Iteratively adjusts the scene threshold to target ~30 segments per hour (typical slide pace)
-   - Treats `--scene-threshold` as the *initial* threshold; the optimizer raises or lowers it until the slide count converges
-   - Merges segments shorter than 2 seconds to suppress rapid flickers
-   - Based on Opencast's VideoSegmenterService implementation
+1. **Transition detection**: Fuses structural similarity, perceptual hash, HSV histogram, edge change, and spatial coverage
+   - Establishes robust median/MAD baselines for each video
+   - Requires complementary evidence to reject presenter motion and brightness flashes
+   - Uses timing only to merge duplicate peaks from the same transition
+   - Writes `transition_detection.json` with auditable scores and thresholds
 2. **Slide Extraction**: Extracts frames at 80% through each segment into `slides/` directory with simple `slide_XXX.jpg` names
 3. **Transcription**: Extracts audio with FFmpeg and submits it, in 2-minute chunks, to the running OpenAI-compatible Whisper HTTP API
 4. **OCR**: Uses Tesseract OCR on extracted slide images
-5. **AI descriptions**: Sends OCR and transcript context to the running `llama.cpp` server
+5. **AI descriptions**: Sends the slide image plus OCR and transcript context to the configured multimodal server
 6. **Export**: Generates Markdown files with YAML front matter, linking slides to their transcripts and OCR content
 
 ## Performance
@@ -249,18 +248,23 @@ curl -I http://127.0.0.1:8427/v1/audio/transcriptions
 ```
 
 Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_WHISPER_URL` if the services listen on different addresses.
+Set `SLIDEGEIST_LLAMACPP_MODEL` when the endpoint exposes more than one model.
+
+For example:
+
+```bash
+export SLIDEGEIST_LLAMACPP_URL=http://model-host:8080
+export SLIDEGEIST_LLAMACPP_MODEL=qwen27b
+export SLIDEGEIST_WHISPER_URL=http://127.0.0.1:8427
+```
 
 ## Limitations
 
-- Scene detection may need threshold tuning for some videos (default 0.025 works well for most lectures; because the optimizer auto-adjusts, use lower values like 0.015 to bias toward more slides or 0.03+ to bias toward fewer major transitions)
+- Transition detection can still miss very small incremental builds or mistake a full-screen animation for a slide. Inspect `transition_detection.json` and extracted frames.
 
-### Advanced Threshold Tuning
-
-- The Opencast optimizer targets roughly 30 segments per hour. That goal works well for standard lectures but you can steer it:
-  - Lower `--scene-threshold` to encourage more segments before optimization. Useful when the optimizer consistently undershoots the actual slide count.
-  - Raise `--scene-threshold` to bias toward fewer segments when the optimizer overshoots and splits slides too often.
-- `--scene-threshold` is still bounded between 0.0 and 1.0. Values outside this range will be rejected by the CLI validator.
-- No speaker diarization
+See [the transition-detection design and oracle benchmark](docs/transition-detection.md).
+ - `--scene-threshold` is still bounded between 0.0 and 1.0. Values outside this range will be rejected by the CLI validator.
+ - No speaker diarization
 - No automatic slide deduplication
 
 ## Development
