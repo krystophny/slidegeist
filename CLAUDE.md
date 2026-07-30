@@ -95,7 +95,7 @@ The response must contain a non-empty `segments` array with real `start`/`end` v
 
 The main `process_video()` function orchestrates processing with smart resume capabilities:
 
-**Smart Resume**: If the output directory contains both a video file and a slides subdirectory with images, slide extraction is skipped and processing resumes from transcription. This lets you re-run slidegeist against the same directory to add transcription to existing slides.
+**Smart Resume**: If the output directory contains both a video file and a slides subdirectory with images, slide extraction is skipped and processing resumes from transcription. This lets you re-run slidegeist against the same directory to add transcription to existing slides. Combined and split Markdown exports checkpoint descriptions atomically. A required stage that remains failed exits nonzero; `--retry-failed` retries it after service recovery.
 
 **Processing Steps**:
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,10 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
     """Ensure process_video writes slides.json and returns paths."""
     # OCR is disabled by default now, no need to mock it
 
-    def fake_detect_scenes(*_: Any, **__: Any) -> list[float]:
+    def fake_detect_scenes(*_: Any, **kwargs: Any) -> list[float]:
+        kwargs["diagnostics_path"].write_text(
+            json.dumps({"timestamps": [2.0]}), encoding="utf-8"
+        )
         return [2.0]
 
     def fake_extract_slides(
@@ -44,9 +48,18 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
             ],
         }
 
+    class FakeDescriber:
+        name = "independent fixture"
+
+        def describe(self, *_: Any, **__: Any) -> str:
+            return "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nKnown fixture"
+
     monkeypatch.setattr("slidegeist.pipeline.detect_scenes", fake_detect_scenes)
     monkeypatch.setattr("slidegeist.pipeline.extract_slides", fake_extract_slides)
     monkeypatch.setattr("slidegeist.pipeline.transcribe_video", fake_transcribe_video)
+    monkeypatch.setattr(
+        "slidegeist.ai_description.build_ai_describer", FakeDescriber
+    )
 
     video_path = tmp_path / "dummy.mp4"
     video_path.write_bytes(b"fake video content")

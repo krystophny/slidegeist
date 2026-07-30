@@ -227,6 +227,10 @@ Introduction to Quantum Mechanics
 5. **AI descriptions**: Sends the slide image plus OCR and transcript context to the configured multimodal server
 6. **Export**: Generates Markdown files with YAML front matter, linking slides to their transcripts and OCR content
 
+Combined and split exports both checkpoint AI descriptions atomically and
+resume without regenerating valid classified frames. A required stage that
+remains failed exits nonzero; use `--retry-failed` after restoring its service.
+
 ## Performance
 
 **Model Recommendations:**

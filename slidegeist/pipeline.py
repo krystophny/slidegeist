@@ -359,6 +359,10 @@ def process_video(
     # Detect which stages are already completed and which have failed
     completed_stages = detect_completed_stages(output_dir)
     failed_stages = detect_failed_stages(output_dir)
+    for stage in ("transcription", "ocr", "ai_description"):
+        if completed_stages[stage] and failed_stages[stage]:
+            clear_stage_failure(output_dir, stage)
+            failed_stages[stage] = False
 
     logger.info("=" * 60)
     logger.info("STAGE DETECTION")
@@ -640,6 +644,14 @@ def process_video(
     if results.get("slides_md"):
         logger.info("✓ Updated slides markdown")
     logger.info(f"✓ All outputs in: {output_dir}")
+
+    remaining_failures = [
+        stage for stage, failed in detect_failed_stages(output_dir).items() if failed
+    ]
+    if remaining_failures:
+        raise RuntimeError(
+            "processing incomplete; failed stages: " + ", ".join(remaining_failures)
+        )
 
     return results
 

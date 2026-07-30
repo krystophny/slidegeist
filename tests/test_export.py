@@ -5,7 +5,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from slidegeist.export import export_slides_json
+from slidegeist.export import (
+    _parse_existing_markdown,
+    _save_incremental_ai_description,
+    export_slides_json,
+)
 from slidegeist.ocr import build_default_ocr_pipeline
 from slidegeist.transcribe import Segment
 
@@ -154,3 +158,35 @@ def test_export_slides_empty_metadata(tmp_path: Path) -> None:
     # No slide markdown files in root (split mode with no slides)
     md_files = list(tmp_path.glob("slide_*.md"))
     assert len(md_files) == 0
+
+
+def test_split_description_checkpoint_is_parsed_and_replaced(
+    tmp_path: Path,
+) -> None:
+    index = tmp_path / "index.md"
+    index.write_text("# Lecture Slides\n", encoding="utf-8")
+    slide = tmp_path / "slide_001.md"
+    slide.write_text(
+        "---\nid: slide_001\nindex: 1\n---\n\n"
+        "# Slide 1\n\n"
+        "## Transcript\n\nKnown speech\n\n"
+        "## AI Description (for reconstruction)\n\n"
+        "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nOld title\n",
+        encoding="utf-8",
+    )
+
+    parsed = _parse_existing_markdown(index)
+    assert parsed["slide_001"]["transcript"] == "Known speech"
+    assert "Old title" in parsed["slide_001"]["ai_description"]
+
+    _save_incremental_ai_description(
+        index,
+        "slide_001",
+        "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nNew title",
+        parsed,
+    )
+
+    updated = slide.read_text(encoding="utf-8")
+    assert "New title" in updated
+    assert "Old title" not in updated
+    assert updated.count("## AI Description (for reconstruction)") == 1

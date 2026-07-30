@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,12 @@ def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
     """
     if not markdown_path.exists():
         return {}
+
+    if markdown_path.name == "index.md":
+        split_data: dict[str, dict[str, str]] = {}
+        for slide_path in sorted(markdown_path.parent.glob("slide_*.md")):
+            split_data.update(_parse_split_slide_markdown(slide_path))
+        return split_data
 
     try:
         content = markdown_path.read_text(encoding="utf-8")
@@ -105,6 +113,52 @@ def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
         slides_data[current_slide_id][current_section] = "\n".join(current_content).strip()
 
     return slides_data
+
+
+def _parse_split_slide_markdown(path: Path) -> dict[str, dict[str, str]]:
+    """Parse one YAML-frontmatter slide file from split export mode."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not read existing split slide %s: %s", path, exc)
+        return {}
+    identifier = re.search(r"^id:\s*(\S+)\s*$", content, re.MULTILINE)
+    if identifier is None:
+        return {}
+    data = {
+        "transcript": "",
+        "ocr": "",
+        "visual_elements": "",
+        "ai_description": "",
+    }
+    headings = list(
+        re.finditer(
+            r"^## (Transcript|OCR Text|AI Description \(for reconstruction\))\s*$",
+            content,
+            re.MULTILINE,
+        )
+    )
+    keys = {
+        "Transcript": "transcript",
+        "OCR Text": "ocr",
+        "AI Description (for reconstruction)": "ai_description",
+    }
+    for position, heading in enumerate(headings):
+        end = headings[position + 1].start() if position + 1 < len(headings) else len(content)
+        data[keys[heading.group(1)]] = content[heading.end() : end].strip()
+    visual = re.search(r"^\*\*Visual Elements:\*\*(.*)$", content, re.MULTILINE)
+    if visual:
+        data["visual_elements"] = visual.group(0).strip()
+    return {identifier.group(1): data}
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        handle.write(content)
+        temporary = Path(handle.name)
+    temporary.replace(path)
 
 
 def export_slides_json(
@@ -611,6 +665,31 @@ def _save_incremental_ai_description(
         return
 
     try:
+        if output_path.name == "index.md":
+            slide_path = output_path.parent / f"{slide_id}.md"
+            if not slide_path.exists():
+                logger.warning(f"Cannot find split slide {slide_id} in {output_path.parent}")
+                return
+            content = slide_path.read_text(encoding="utf-8")
+            heading = "## AI Description (for reconstruction)"
+            start = content.find(heading)
+            if start >= 0:
+                following = re.search(r"^## ", content[start + len(heading) :], re.MULTILINE)
+                end = (
+                    start + len(heading) + following.start()
+                    if following
+                    else len(content)
+                )
+                before = content[:start].rstrip()
+                after = content[end:].lstrip()
+                content = before + (f"\n\n{after}" if after else "")
+            content = (
+                content.rstrip()
+                + f"\n\n{heading}\n\n{ai_description}\n"
+            )
+            _atomic_write_text(slide_path, content)
+            return
+
         content = output_path.read_text(encoding="utf-8")
         lines = content.split("\n")
 
@@ -667,7 +746,7 @@ def _save_incremental_ai_description(
         lines[insert_pos:insert_pos] = new_section
 
         # Write back
-        output_path.write_text("\n".join(lines), encoding="utf-8")
+        _atomic_write_text(output_path, "\n".join(lines))
         logger.debug(f"Saved AI description for {slide_id} to {output_path}")
 
     except Exception as exc:

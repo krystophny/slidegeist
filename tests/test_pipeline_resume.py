@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-from slidegeist.pipeline import detect_completed_stages, load_transcript_checkpoint
+import pytest
+
+from slidegeist.pipeline import (
+    detect_completed_stages,
+    load_transcript_checkpoint,
+    process_video,
+)
 
 
 def _write_slide(output: Path, number: int) -> None:
@@ -76,6 +82,20 @@ def test_filter_plan_with_unexported_rejected_section_remains_resumable(
     assert not detect_completed_stages(tmp_path)["ai_description"]
 
 
+def test_split_export_with_classified_description_is_complete(tmp_path: Path) -> None:
+    _write_slide(tmp_path, 1)
+    (tmp_path / "index.md").write_text("# Lecture Slides\n", encoding="utf-8")
+    (tmp_path / "slide_001.md").write_text(
+        "---\nid: slide_001\nindex: 1\ntime_start: 0.0\ntime_end: 10.0\n---\n\n"
+        "# Slide 1\n\n"
+        "## AI Description (for reconstruction)\n\n"
+        "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nKnown split fixture\n",
+        encoding="utf-8",
+    )
+
+    assert detect_completed_stages(tmp_path)["ai_description"]
+
+
 def test_resume_loads_timed_transcript_context(tmp_path: Path) -> None:
     """A durable checkpoint preserves the speech window used after restart."""
     checkpoint = tmp_path / "transcript.json"
@@ -109,3 +129,25 @@ def test_resume_loads_timed_transcript_context(tmp_path: Path) -> None:
             "words": [{"word": "moment", "start": 12.9, "end": 13.2}],
         }
     ]
+
+
+def test_unretried_failed_stage_returns_a_processing_error(tmp_path: Path) -> None:
+    video = tmp_path / "known.mp4"
+    video.write_bytes(b"known video placeholder")
+    _write_slide(tmp_path, 1)
+    (tmp_path / "transcript.json").write_text(
+        json.dumps(
+            {"segments": [{"start": 0.0, "end": 1.0, "text": "Known speech"}]}
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "slides.md").write_text(
+        _section(1) + "\n### OCR Text\nKnown OCR\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".ai_description_failed").write_text(
+        "independent service failure", encoding="utf-8"
+    )
+
+    with pytest.raises(RuntimeError, match="failed stages: ai_description"):
+        process_video(video, tmp_path)
