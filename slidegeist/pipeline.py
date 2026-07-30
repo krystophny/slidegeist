@@ -16,9 +16,44 @@ from slidegeist.export import export_slides_json
 from slidegeist.ffmpeg import detect_scenes
 from slidegeist.ocr import OcrPipeline
 from slidegeist.slides import extract_slides
-from slidegeist.transcribe import transcribe_video
+from slidegeist.transcribe import Segment, Word, transcribe_video
 
 logger = logging.getLogger(__name__)
+
+
+def load_transcript_checkpoint(path: Path) -> list[Segment]:
+    """Load normalized timestamped segments from a transcript checkpoint."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_segments = payload.get("segments", [])
+    if not isinstance(raw_segments, list):
+        raise ValueError(f"Transcript checkpoint has invalid segments: {path}")
+
+    segments: list[Segment] = []
+    for raw in raw_segments:
+        if not isinstance(raw, dict):
+            continue
+        text = str(raw.get("text", "")).strip()
+        if not text:
+            continue
+        start = float(raw.get("start", 0.0))
+        end = float(raw.get("end", start))
+        raw_words = raw.get("words", [])
+        words: list[Word] = []
+        if isinstance(raw_words, list):
+            for raw_word in raw_words:
+                if not isinstance(raw_word, dict):
+                    continue
+                word = str(raw_word.get("word", "")).strip()
+                if word:
+                    words.append(
+                        {
+                            "word": word,
+                            "start": float(raw_word.get("start", start)),
+                            "end": float(raw_word.get("end", end)),
+                        }
+                    )
+        segments.append({"start": start, "end": end, "text": text, "words": words})
+    return segments
 
 
 def has_existing_slides(output_dir: Path) -> bool:
@@ -405,7 +440,10 @@ def process_video(
         results["slides_md"] = markdown_path
 
     # Step 3: Transcription (skip if already done, or failed without retry)
-    transcript_segments = []
+    transcript_segments: list[Segment] = []
+    if completed_stages["transcription"]:
+        transcript_segments = load_transcript_checkpoint(output_dir / "transcript.json")
+        results["transcript_json"] = output_dir / "transcript.json"
     should_skip_transcription = (
         skip_transcription
         or completed_stages["transcription"]  # Always skip if completed

@@ -1,8 +1,9 @@
 """Behavioral resume-stage tests."""
 
+import json
 from pathlib import Path
 
-from slidegeist.pipeline import detect_completed_stages
+from slidegeist.pipeline import detect_completed_stages, load_transcript_checkpoint
 
 
 def _write_slide(output: Path, number: int) -> None:
@@ -45,3 +46,38 @@ def test_all_ai_descriptions_mark_stage_complete(tmp_path: Path) -> None:
     )
 
     assert detect_completed_stages(tmp_path)["ai_description"]
+
+
+def test_resume_loads_timed_transcript_context(tmp_path: Path) -> None:
+    """A durable checkpoint preserves the speech window used after restart."""
+    checkpoint = tmp_path / "transcript.json"
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {
+                        "start": 12.5,
+                        "end": 15.0,
+                        "text": "  The magnetic moment is conserved. ",
+                        "words": [
+                            {
+                                "word": "moment",
+                                "start": 12.9,
+                                "end": 13.2,
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_transcript_checkpoint(checkpoint) == [
+        {
+            "start": 12.5,
+            "end": 15.0,
+            "text": "The magnetic moment is conserved.",
+            "words": [{"word": "moment", "start": 12.9, "end": 13.2}],
+        }
+    ]
