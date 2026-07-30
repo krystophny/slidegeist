@@ -244,16 +244,19 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
         # A partial incremental run is resumable, not complete. Require one
         # non-empty description section per extracted slide.
         from slidegeist.export import _parse_existing_markdown
-        from slidegeist.frame_filter import is_non_slide_description
+        from slidegeist.frame_filter import is_slide_description
 
-        slide_count = len(load_existing_slide_metadata(output_dir))
-        described_count = sum(
-            1
-            for data in _parse_existing_markdown(markdown_path).values()
-            if data.get("ai_description", "").strip()
-            and not is_non_slide_description(data["ai_description"])
+        metadata = load_existing_slide_metadata(output_dir)
+        actual_ids = {item[3].stem for item in metadata}
+        parsed = _parse_existing_markdown(markdown_path)
+        described_ids = {
+            slide_id
+            for slide_id, data in parsed.items()
+            if is_slide_description(data.get("ai_description", ""))
+        }
+        stages["ai_description"] = bool(actual_ids) and (
+            set(parsed) == actual_ids == described_ids
         )
-        stages["ai_description"] = slide_count > 0 and described_count == slide_count
 
     except Exception as e:
         logger.debug(f"Could not parse markdown for stage detection: {e}")

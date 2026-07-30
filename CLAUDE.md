@@ -119,6 +119,8 @@ The main `process_video()` function orchestrates processing with smart resume ca
    browsers, dialogs, recording controls, loading screens, and teaching pages
    obscured by operating-system UI are excluded from the deck. Raw boundaries,
    rejection reasons, and frame hashes remain in `transition_detection.json`.
+   Missing or contradictory classifications remain resumable, and interrupted
+   rejection renames are recovered from the durable diagnostic plan.
 
 6. **Export** (`export.py`): Generates Markdown with YAML front matter.
    - Default: single `slides.md` with table of contents (LLM-friendly).
