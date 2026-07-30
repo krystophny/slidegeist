@@ -629,8 +629,8 @@ def run_ai_descriptions(
 
         transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
 
-        ocr_text = ""
-        if ocr_pipeline is not None:
+        ocr_text = existing_data.get(slide_id, {}).get("ocr", "")
+        if not ocr_text and ocr_pipeline is not None:
             try:
                 ocr_result = ocr_pipeline.process(image_path, transcript_text, [])
                 ocr_text = ocr_result.get("raw_text", "")
@@ -683,18 +683,11 @@ def _save_incremental_ai_description(
             start = content.find(heading)
             if start >= 0:
                 following = re.search(r"^## ", content[start + len(heading) :], re.MULTILINE)
-                end = (
-                    start + len(heading) + following.start()
-                    if following
-                    else len(content)
-                )
+                end = start + len(heading) + following.start() if following else len(content)
                 before = content[:start].rstrip()
                 after = content[end:].lstrip()
                 content = before + (f"\n\n{after}" if after else "")
-            content = (
-                content.rstrip()
-                + f"\n\n{heading}\n\n{ai_description}\n"
-            )
+            content = content.rstrip() + f"\n\n{heading}\n\n{ai_description}\n"
             _atomic_write_text(slide_path, content)
             return
 

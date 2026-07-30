@@ -10,6 +10,7 @@ from slidegeist.export import (
     _parse_existing_markdown,
     _save_incremental_ai_description,
     export_slides_json,
+    run_ai_descriptions,
 )
 from slidegeist.ocr import build_default_ocr_pipeline
 from slidegeist.transcribe import Segment
@@ -172,9 +173,7 @@ def test_checkpoint_export_does_not_invoke_ocr(
     def unexpected_ocr_build() -> None:
         pytest.fail("checkpoint export invoked OCR")
 
-    monkeypatch.setattr(
-        "slidegeist.ocr.build_default_ocr_pipeline", unexpected_ocr_build
-    )
+    monkeypatch.setattr("slidegeist.ocr.build_default_ocr_pipeline", unexpected_ocr_build)
 
     output = tmp_path / "slides.md"
     export_slides_json(
@@ -187,6 +186,46 @@ def test_checkpoint_export_does_not_invoke_ocr(
 
     assert "slides/slide_001.jpg" in output.read_text()
     assert "OCR Text" not in output.read_text()
+
+
+def test_ai_description_reuses_persisted_ocr(
+    tmp_path: Path,
+) -> None:
+    slides = tmp_path / "slides"
+    slides.mkdir()
+    image = slides / "slide_001.jpg"
+    _make_image(image, 255)
+    output = tmp_path / "slides.md"
+    output.write_text(
+        '<a name="slide_001"></a>\n'
+        "## Slide 1\n\n"
+        "[![Slide](slides/slide_001.jpg)](slides/slide_001.jpg)\n\n"
+        "### OCR Text\n\nPersisted equation text\n\n---\n",
+        encoding="utf-8",
+    )
+
+    class FailingOcr:
+        def process(self, *_: object, **__: object) -> dict[str, object]:
+            pytest.fail("AI description repeated persisted OCR")
+
+    class RecordingDescriber:
+        seen_ocr = ""
+
+        def describe(self, _: Path, __: str, ocr_text: str) -> str:
+            self.seen_ocr = ocr_text
+            return "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nKnown state"
+
+    describer = RecordingDescriber()
+    descriptions = run_ai_descriptions(
+        [(1, 0.0, 10.0, image)],
+        [],
+        describer,  # type: ignore[arg-type]
+        FailingOcr(),  # type: ignore[arg-type]
+        output_path=output,
+    )
+
+    assert describer.seen_ocr == "Persisted equation text"
+    assert descriptions["slide_001"].startswith("0. FRAME TYPE\nSLIDE")
 
 
 def test_split_description_checkpoint_is_parsed_and_replaced(
