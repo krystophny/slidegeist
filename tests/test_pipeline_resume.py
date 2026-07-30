@@ -136,10 +136,10 @@ def test_resume_prefers_exact_detector_timestamps_over_markdown_display(
     tmp_path: Path,
 ) -> None:
     _write_slide(tmp_path, 1)
-    _write_slide(tmp_path, 2)
+    _write_slide(tmp_path, 3)
     (tmp_path / "slides.md").write_text(
         '<a name="slide_001"></a>\n**Time:** 00:00 - 00:12\n---\n'
-        '<a name="slide_002"></a>\n**Time:** 00:12 - 00:30\n---\n',
+        '<a name="slide_003"></a>\n**Time:** 00:12 - 00:30\n---\n',
         encoding="utf-8",
     )
     (tmp_path / "transition_detection.json").write_text(
@@ -154,9 +154,21 @@ def test_resume_prefers_exact_detector_timestamps_over_markdown_display(
 
     metadata = load_existing_slide_metadata(tmp_path)
 
-    assert [(start, end) for _, start, end, _ in metadata] == [
-        (0.0, 12.375),
-        (12.375, 30.625),
+    assert [(index, start, end) for index, start, end, _ in metadata] == [
+        (1, 0.0, 12.375),
+        (3, 12.375, 30.625),
+    ]
+
+
+def test_resume_falls_back_to_original_image_identity(tmp_path: Path) -> None:
+    _write_slide(tmp_path, 2)
+    _write_slide(tmp_path, 5)
+
+    metadata = load_existing_slide_metadata(tmp_path)
+
+    assert [(index, start, end) for index, start, end, _ in metadata] == [
+        (2, 0.0, 0.0),
+        (5, 0.0, 0.0),
     ]
 
 

@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+import re
 from pathlib import Path
 
 from slidegeist.constants import (
@@ -131,6 +132,10 @@ def load_existing_slide_metadata(
         key=lambda p: p.name,
     )
 
+    def original_index(slide_path: Path, fallback: int) -> int:
+        match = re.fullmatch(r"slide_(\d+)", slide_path.stem)
+        return int(match.group(1)) if match else fallback
+
     # Try to parse timing information from markdown
     timing_info: dict[str, tuple[float, float]] = {}
     markdown_path = output_dir / "slides.md"
@@ -139,7 +144,6 @@ def load_existing_slide_metadata(
 
     if markdown_path.exists():
         try:
-            import re
             content = markdown_path.read_text(encoding="utf-8")
             # Look for patterns like: **Time:** 00:05 - 01:23
             # or in YAML frontmatter: time_start: 5.0 / time_end: 83.0
@@ -194,21 +198,27 @@ def load_existing_slide_metadata(
                     starts = [0.0, *timestamps]
                     ends = [*timestamps, numeric_video_end]
                     return [
-                        (index, starts[index - 1], ends[index - 1], slide_path)
-                        for index, slide_path in enumerate(slide_files, start=1)
+                        (
+                            original_index(slide_path, position),
+                            starts[position - 1],
+                            ends[position - 1],
+                            slide_path,
+                        )
+                        for position, slide_path in enumerate(slide_files, start=1)
                     ]
         except (FFmpegError, KeyError, OSError, TypeError, ValueError):
             logger.debug("Ignoring invalid transition timing checkpoint")
 
     metadata: list[tuple[int, float, float, Path]] = []
-    for idx, slide_path in enumerate(slide_files, start=1):
+    for position, slide_path in enumerate(slide_files, start=1):
         slide_id = slide_path.stem
+        index = original_index(slide_path, position)
         if slide_id in timing_info:
             t_start, t_end = timing_info[slide_id]
-            metadata.append((idx, t_start, t_end, slide_path))
+            metadata.append((index, t_start, t_end, slide_path))
         else:
             # Default to 0.0 if not found
-            metadata.append((idx, 0.0, 0.0, slide_path))
+            metadata.append((index, 0.0, 0.0, slide_path))
 
     return metadata
 
