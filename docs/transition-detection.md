@@ -25,10 +25,11 @@ official implementations:
   differences and its adaptive detector is preferred over a single global
   threshold:
   <https://github.com/Breakthrough/PySceneDetect/blob/main/scenedetect/detectors/content_detector.py>.
-- PySceneDetect 0.7's source-time overhaul confirms that presentation
-  timestamps, not average-frame-rate arithmetic, are required for correct VFR
-  boundaries:
-  <https://github.com/Breakthrough/PySceneDetect/releases/tag/v0.7>.
+- PySceneDetect's current 0.7.1 implementation and 0.7 migration guide confirm
+  that PTS-backed source timestamps, not average-frame-rate arithmetic, are
+  required for correct VFR boundaries:
+  <https://github.com/Breakthrough/PySceneDetect> and
+  <https://www.scenedetect.com/docs/latest/api/migration_guide.html>.
 - Adams and MacKay provide the probabilistic foundation for cadence-free
   change-point inference: <https://arxiv.org/abs/0710.3742>.
 
