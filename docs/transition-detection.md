@@ -43,6 +43,10 @@ score. This rejects localized presenter motion and brightness-only flashes
 better than a pixel threshold while retaining colour-dominant slide changes.
 Local peak selection merges multiple samples from one transition; the
 minimum-segment setting is only a duplicate-suppression window.
+A final peak is retained only when at least one later sample supports the
+minimum stable-scene window (allowing for sampling resolution). This rejects
+recording-end fades and flashes that cannot represent a usable slide; it does
+not impose a cadence or cap transitions elsewhere in the video.
 
 FFmpeg selects the source-presentation-time evidence grid and downsizes those
 frames before piping them to Python. Source presentation timestamps, rather
@@ -63,10 +67,12 @@ material. Transcript timestamps remain useful after visual segmentation.
 
 `tests/test_transition_detector.py` generates videos with known, irregular
 transition times, a moving presenter-like occluder, and a full-frame
-luminance flash. A separate sparse VFR fixture has known presentation-time
-changes. Tests require every oracle transition within the stated tolerance and
-no false positive at the flash. This is independent behavioral ground truth,
-not a check that repository state matches the patch.
+luminance flash. It also includes a strong terminal visual change without a
+stable hold, which must not create an extra slide. A separate sparse VFR
+fixture has known presentation-time changes. Tests require every oracle
+transition within the stated tolerance and no false positive at either flash.
+This is independent behavioral ground truth, not a check that repository state
+matches the patch.
 
 Run the benchmark:
 

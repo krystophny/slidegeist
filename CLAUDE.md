@@ -102,6 +102,7 @@ The main `process_video()` function orchestrates processing with smart resume ca
 1. **Transition Detection** (`transition_detector.py`): Fuses SSIM-like structure, perceptual hash, HSV histogram, edges, and spatial coverage.
    - Robust per-video baselines replace cadence assumptions.
    - `--scene-threshold` is a bounded sensitivity bias, never a count target.
+   - A terminal flash or recording fade is rejected when no later sample supports a stable scene.
    - `transition_detection.json` records evidence and thresholds.
 
 2. **Slide Extraction** (`slides.py`): Extracts frames at 80% through each detected segment.

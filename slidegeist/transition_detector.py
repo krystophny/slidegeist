@@ -221,6 +221,22 @@ def _select_peaks(evidence: list[FrameEvidence], min_scene_len: float) -> list[f
     return [max(group, key=lambda item: item.score).timestamp for group in groups]
 
 
+def _remove_unstable_terminal_peak(
+    timestamps: list[float],
+    *,
+    last_sample_timestamp: float,
+    min_scene_len: float,
+    sample_interval: float,
+) -> list[float]:
+    """Reject a terminal flash/fade with no sampled evidence of a stable scene."""
+    stability_window = max(0.01, min_scene_len - sample_interval)
+    return [
+        timestamp
+        for timestamp in timestamps
+        if last_sample_timestamp - timestamp >= stability_window
+    ]
+
+
 def _read_exact(stream: Any, size: int) -> bytes:
     """Read one fixed-size raw frame from a pipe."""
     chunks = bytearray()
@@ -382,10 +398,22 @@ def analyze_slide_transitions(
     threshold_bias = float(np.clip((threshold - 0.025) * 8.0, -0.18, 0.30))
     scored, thresholds = _score_evidence(evidence, threshold_bias)
     timestamps = _select_peaks(scored, min_scene_len)
+    selected_count = len(timestamps)
+    if evidence:
+        timestamps = _remove_unstable_terminal_peak(
+            timestamps,
+            last_sample_timestamp=evidence[-1].timestamp,
+            min_scene_len=min_scene_len,
+            sample_interval=sample_interval,
+        )
+    thresholds["terminal_stability"] = max(0.01, min_scene_len - sample_interval)
+    discarded_terminal = selected_count - len(timestamps)
     logger.info(
-        "Robust visual ensemble found %d transitions from %d samples (no cadence prior)",
+        "Robust visual ensemble found %d transitions from %d samples "
+        "(%d unstable terminal flash/fade discarded; no cadence prior)",
         len(timestamps),
         len(scored),
+        discarded_terminal,
     )
     return TransitionAnalysis(timestamps, sample_interval, thresholds, scored)
 

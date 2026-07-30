@@ -77,6 +77,22 @@ def test_dense_irregular_transitions_do_not_raise_their_own_threshold(tmp_path: 
     _match(analysis.timestamps, oracle)
 
 
+def test_recording_end_fade_does_not_create_a_slide(tmp_path: Path) -> None:
+    """A visually strong terminal state without a stable hold is not a slide."""
+    video = tmp_path / "terminal-flash.avi"
+    make_slide_video(
+        video,
+        [3.0, 9.4],
+        duration=10.0,
+        moving_occluder=False,
+        luminance_flicker_at=None,
+    )
+
+    analysis = analyze_slide_transitions(video, start_offset=0.0)
+
+    _match(analysis.timestamps, [3.0])
+
+
 def test_variable_frame_rate_uses_source_presentation_times(tmp_path: Path) -> None:
     """Sparse VFR frames retain their known timeline instead of average-FPS timing."""
     oracle = [1.52, 5.52]
