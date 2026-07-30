@@ -75,9 +75,10 @@ their time span is merged into the neighboring instructional interval, and
 their classification plus image hash is retained in
 `transition_detection.json`. The raw detector boundaries remain under
 `raw_timestamps`, so this semantic filtering is reversible and auditable.
-An absent or contradictory frame-type answer is a resumable failure, never an
-implicit acceptance. The rejection plan is written atomically before images
-are reversibly renamed; a restart verifies hashes and completes any interrupted
+An absent or contradictory frame-type answer, or a `SLIDE` response missing
+any required reconstruction section, is a resumable failure, never an implicit
+acceptance. The rejection plan is written atomically before images are
+reversibly renamed; a restart verifies hashes and completes any interrupted
 rename set before re-exporting the deck metadata.
 
 This second stage uses visual content rather than cadence or an expected slide

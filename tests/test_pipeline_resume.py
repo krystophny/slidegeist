@@ -29,11 +29,22 @@ def _section(number: int, description: str = "") -> str:
     return f'<a name="slide_{number:03d}"></a>\n\n## Slide {number}\n\n{description_section}---\n'
 
 
+def _complete_description(title: str) -> str:
+    return (
+        "0. FRAME TYPE\nSLIDE\n\n"
+        f"1. TITLE\n{title}\n\n"
+        "2. TEXT CONTENT\nKnown text\n\n"
+        "3. FORMULAS\nNone\n\n"
+        "4. VISUAL ELEMENTS\nNone\n\n"
+        "5. LAYOUT\nCentered"
+    )
+
+
 def test_partial_ai_descriptions_remain_resumable(tmp_path: Path) -> None:
     _write_slide(tmp_path, 1)
     _write_slide(tmp_path, 2)
     (tmp_path / "slides.md").write_text(
-        _section(1, "0. FRAME TYPE\nSLIDE\n\nComplete first description") + _section(2),
+        _section(1, _complete_description("Complete first description")) + _section(2),
         encoding="utf-8",
     )
 
@@ -44,8 +55,8 @@ def test_all_ai_descriptions_mark_stage_complete(tmp_path: Path) -> None:
     _write_slide(tmp_path, 1)
     _write_slide(tmp_path, 2)
     (tmp_path / "slides.md").write_text(
-        _section(1, "0. FRAME TYPE\nSLIDE\n\nComplete first description")
-        + _section(2, "0. FRAME TYPE\nSLIDE\n\nComplete second description"),
+        _section(1, _complete_description("Complete first description"))
+        + _section(2, _complete_description("Complete second description")),
         encoding="utf-8",
     )
 
@@ -71,8 +82,8 @@ def test_filter_plan_with_unexported_rejected_section_remains_resumable(
     rejected = tmp_path / "slides" / "slide_002.jpg.non-slide"
     rejected.write_bytes(b"known rejected frame")
     (tmp_path / "slides.md").write_text(
-        _section(1, "0. FRAME TYPE\nSLIDE\n\nAccepted")
-        + _section(2, "0. FRAME TYPE\nNON-SLIDE\n\nRejected"),
+        _section(1, _complete_description("Accepted"))
+        + _section(2, "0. FRAME TYPE\nNON-SLIDE"),
         encoding="utf-8",
     )
 
@@ -86,7 +97,8 @@ def test_split_export_with_classified_description_is_complete(tmp_path: Path) ->
         "---\nid: slide_001\nindex: 1\ntime_start: 0.0\ntime_end: 10.0\n---\n\n"
         "# Slide 1\n\n"
         "## AI Description (for reconstruction)\n\n"
-        "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nKnown split fixture\n",
+        + _complete_description("Known split fixture")
+        + "\n",
         encoding="utf-8",
     )
 

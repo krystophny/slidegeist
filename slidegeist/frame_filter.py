@@ -13,6 +13,13 @@ _FRAME_TYPE = re.compile(
     r"^0\.\s*FRAME TYPE\s*:?\s*(?:\n[ \t]*)?(NON[-_ ]?SLIDE|SLIDE)\b",
     re.IGNORECASE | re.MULTILINE,
 )
+_RECONSTRUCTION_SECTIONS = (
+    re.compile(r"^1\.\s*TITLE\b", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^2\.\s*TEXT CONTENT\b", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^3\.\s*FORMULAS\b", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^4\.\s*VISUAL ELEMENTS\b", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^5\.\s*LAYOUT\b", re.IGNORECASE | re.MULTILINE),
+)
 _STATE_FILTER = "multimodal-instructional-content-v1"
 
 
@@ -30,13 +37,20 @@ def frame_type(description: str) -> str | None:
 
 
 def is_slide_description(description: str) -> bool:
-    """Return whether a structured description explicitly accepts the frame."""
-    return frame_type(description) == "SLIDE"
+    """Return whether an accepted frame has a complete reconstruction."""
+    return frame_type(description) == "SLIDE" and all(
+        pattern.search(description) for pattern in _RECONSTRUCTION_SECTIONS
+    )
 
 
 def is_non_slide_description(description: str) -> bool:
     """Return whether a structured description explicitly rejects the frame."""
     return frame_type(description) == "NON-SLIDE"
+
+
+def is_complete_frame_description(description: str) -> bool:
+    """Return whether a model response fully satisfies its frame-type contract."""
+    return is_non_slide_description(description) or is_slide_description(description)
 
 
 def _sha256(path: Path) -> str:
@@ -152,15 +166,15 @@ def filter_non_slide_states(
         rejected_ids = {str(state["slide_id"]) for state in existing_rejections}
         return _filtered_metadata(slide_metadata, rejected_ids, float(video_end))
 
-    unclassified = [
+    incomplete = [
         item[3].stem
         for item in slide_metadata
-        if frame_type(descriptions.get(item[3].stem, "")) is None
+        if not is_complete_frame_description(descriptions.get(item[3].stem, ""))
     ]
-    if unclassified:
+    if incomplete:
         raise RuntimeError(
-            "multimodal descriptions lack an unambiguous frame type: "
-            + ", ".join(unclassified)
+            "multimodal descriptions are unclassified or incomplete: "
+            + ", ".join(incomplete)
         )
 
     rejected = [

@@ -52,7 +52,14 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
         name = "independent fixture"
 
         def describe(self, *_: Any, **__: Any) -> str:
-            return "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nKnown fixture"
+            return (
+                "0. FRAME TYPE\nSLIDE\n\n"
+                "1. TITLE\nKnown fixture\n\n"
+                "2. TEXT CONTENT\nKnown text\n\n"
+                "3. FORMULAS\nNone\n\n"
+                "4. VISUAL ELEMENTS\nNone\n\n"
+                "5. LAYOUT\nCentered"
+            )
 
     monkeypatch.setattr("slidegeist.pipeline.detect_scenes", fake_detect_scenes)
     monkeypatch.setattr("slidegeist.pipeline.extract_slides", fake_extract_slides)

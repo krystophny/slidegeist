@@ -9,12 +9,34 @@ from pathlib import Path
 from slidegeist.frame_filter import (
     filter_non_slide_states,
     frame_type,
+    is_complete_frame_description,
     is_non_slide_description,
+    is_slide_description,
 )
 
 
 def _description(frame_type: str) -> str:
-    return f"0. FRAME TYPE\n{frame_type}\n\n1. TITLE\nKnown fixture"
+    if frame_type == "NON-SLIDE":
+        return "0. FRAME TYPE\nNON-SLIDE"
+    return (
+        "0. FRAME TYPE\nSLIDE\n\n"
+        "1. TITLE\nKnown fixture\n\n"
+        "2. TEXT CONTENT\nKnown text\n\n"
+        "3. FORMULAS\nNone\n\n"
+        "4. VISUAL ELEMENTS\nNone\n\n"
+        "5. LAYOUT\nCentered"
+    )
+
+
+def test_slide_description_requires_every_reconstruction_section() -> None:
+    complete = _description("SLIDE")
+    truncated = complete.partition("\n4. VISUAL ELEMENTS")[0]
+
+    assert is_slide_description(complete)
+    assert is_complete_frame_description(complete)
+    assert not is_slide_description(truncated)
+    assert not is_complete_frame_description(truncated)
+    assert is_complete_frame_description(_description("NON-SLIDE"))
 
 
 def test_non_slide_state_is_removed_and_neighboring_intervals_merge(
@@ -82,7 +104,7 @@ def test_filter_rejects_a_description_without_frame_type(tmp_path: Path) -> None
             diagnostics,
         )
     except RuntimeError as exc:
-        assert "lack an unambiguous frame type" in str(exc)
+        assert "unclassified or incomplete" in str(exc)
     else:
         raise AssertionError("ambiguous description was silently accepted")
 

@@ -587,7 +587,7 @@ def run_ai_descriptions(
 
     descriptions: dict[str, str] = {}
 
-    from slidegeist.frame_filter import frame_type
+    from slidegeist.frame_filter import is_complete_frame_description
 
     # Load existing classified descriptions to skip already processed slides.
     # Legacy or malformed responses are regenerated instead of silently accepted.
@@ -600,7 +600,7 @@ def run_ai_descriptions(
         existing_count = sum(
             1
             for data in existing_data.values()
-            if frame_type(data.get("ai_description", "")) is not None
+            if is_complete_frame_description(data.get("ai_description", ""))
         )
         if existing_count > 0:
             if existing_count == total_slides:
@@ -621,7 +621,9 @@ def run_ai_descriptions(
         if (
             not force_redo
             and slide_id in existing_data
-            and frame_type(existing_data[slide_id].get("ai_description", "")) is not None
+            and is_complete_frame_description(
+                existing_data[slide_id].get("ai_description", "")
+            )
         ):
             descriptions[slide_id] = existing_data[slide_id]["ai_description"]
             logger.debug(f"Skipping {slide_id} (already has AI description)")
