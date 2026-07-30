@@ -249,12 +249,16 @@ curl -I http://127.0.0.1:8427/v1/audio/transcriptions
 
 Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_WHISPER_URL` if the services listen on different addresses.
 Set `SLIDEGEIST_LLAMACPP_MODEL` when the endpoint exposes more than one model.
+`SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION` controls the longest edge of the
+multimodal request image (default: 1024). This reduces service latency without
+changing the full-resolution extracted slide stored on disk.
 
 For example:
 
 ```bash
 export SLIDEGEIST_LLAMACPP_URL=http://model-host:8080
 export SLIDEGEIST_LLAMACPP_MODEL=qwen27b
+export SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION=1024
 export SLIDEGEIST_WHISPER_URL=http://127.0.0.1:8427
 ```
 

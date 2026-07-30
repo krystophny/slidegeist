@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import io
 from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from slidegeist import services
 from slidegeist.transcribe import transcribe_video
@@ -16,7 +19,7 @@ def test_llama_completion_sends_image_and_configured_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     image = tmp_path / "slide.png"
-    image.write_bytes(b"\x89PNG\r\n\x1a\nvisual-oracle")
+    Image.new("RGB", (32, 16), color=(17, 43, 91)).save(image)
     captured: dict[str, Any] = {}
 
     def fake_http_json(url: str, **kwargs: Any) -> dict[str, Any]:
@@ -35,6 +38,32 @@ def test_llama_completion_sends_image_and_configured_model(
     content = payload["messages"][0]["content"]
     assert content[0] == {"type": "text", "text": "Describe"}
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_llama_completion_limits_only_service_image_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "wide-slide.png"
+    Image.new("RGB", (2400, 1200), color=(17, 43, 91)).save(image)
+    original = image.read_bytes()
+    captured: dict[str, Any] = {}
+
+    def fake_http_json(_: str, **kwargs: Any) -> dict[str, Any]:
+        captured["payload"] = kwargs["payload"]
+        return {"choices": [{"message": {"content": "Visible slide"}}]}
+
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen27b")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION", "800")
+    monkeypatch.setattr(services, "_http_json", fake_http_json)
+
+    services.llama_cpp_complete("Describe", image_path=image)
+
+    data_url = captured["payload"]["messages"][0]["content"][1]["image_url"]["url"]
+    encoded = data_url.partition(",")[2]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as sent:
+        assert sent.size == (800, 400)
+    assert image.read_bytes() == original
 
 
 def test_transcription_refuses_partial_chunk_result(

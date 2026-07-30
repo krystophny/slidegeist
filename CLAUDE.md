@@ -50,6 +50,9 @@ Slidegeist talks to two locally hosted OpenAI-compatible HTTP endpoints. Both mu
 All HTTP is implemented in `slidegeist/services.py` using the stdlib only.
 Health probes hit `/health` first; Whisper falls back to probing
 `/v1/audio/transcriptions` for compatible servers without a health route.
+For multimodal requests, `SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION` limits the
+longest edge of the service copy (default 1024 pixels) while preserving the
+full-resolution extracted frame on disk.
 
 ### Recommended Whisper server: whisper.cpp
 
@@ -109,7 +112,7 @@ The main `process_video()` function orchestrates processing with smart resume ca
 
 4. **OCR** (`ocr.py`): Tesseract only (`eng+deu`, PSM 1). The OCR result is supporting context for the multimodal describer in (5).
 
-5. **AI Slide Description** (`ai_description.py` + `services.llama_cpp_complete`): Sends the slide image with OCR text and the transcript window to a multimodal llama.cpp server. `SLIDEGEIST_LLAMACPP_MODEL` can select a model explicitly; otherwise the first `/v1/models` entry is used.
+5. **AI Slide Description** (`ai_description.py` + `services.llama_cpp_complete`): Sends the slide image with OCR text and the transcript window to a multimodal llama.cpp server. `SLIDEGEIST_LLAMACPP_MODEL` can select a model explicitly; otherwise the first `/v1/models` entry is used. Oversized images are reduced only in the HTTP request to avoid spending vision-token compute on pixels beyond normal slide-reading resolution.
 
 6. **Export** (`export.py`): Generates Markdown with YAML front matter.
    - Default: single `slides.md` with table of contents (LLM-friendly).

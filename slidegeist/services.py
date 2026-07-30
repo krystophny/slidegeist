@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import mimetypes
@@ -14,6 +15,8 @@ from http.client import HTTPConnection, HTTPResponse, HTTPSConnection
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
+
+from PIL import Image, ImageOps
 
 from slidegeist.constants import DEFAULT_LLAMACPP_URL, DEFAULT_WHISPER_URL
 
@@ -34,6 +37,39 @@ def get_llama_cpp_model_override() -> str | None:
     """Return an explicitly configured vision/text model id, if any."""
     value = os.getenv("SLIDEGEIST_LLAMACPP_MODEL", "").strip()
     return value or None
+
+
+def get_llama_cpp_max_image_dimension() -> int:
+    """Return the longest image edge sent to the multimodal service."""
+    raw = os.getenv("SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION", "1024")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION must be an integer"
+        ) from exc
+    if value < 256:
+        raise ValueError("SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION must be at least 256")
+    return value
+
+
+def _image_data_url(image_path: Path) -> str:
+    """Encode an image, shrinking only the service copy when it exceeds the limit."""
+    max_dimension = get_llama_cpp_max_image_dimension()
+    with Image.open(image_path) as source:
+        image = ImageOps.exif_transpose(source)
+        if max(image.size) <= max_dimension:
+            mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+            encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+            return f"data:{mime_type};base64,{encoded}"
+
+        image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+        if image.mode not in {"RGB", "L"}:
+            image = image.convert("RGB")
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=90, optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
 
 
 def _http_json(
@@ -141,13 +177,11 @@ def llama_cpp_complete(
     """
     content: str | list[dict[str, Any]] = prompt
     if image_path is not None:
-        mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
-        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         content = [
             {"type": "text", "text": prompt},
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
+                "image_url": {"url": _image_data_url(image_path)},
             },
         ]
 
