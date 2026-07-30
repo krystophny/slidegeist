@@ -596,6 +596,7 @@ def process_video(
             ocr_pipeline=ocr_pipeline,
             source_url=source_url,
             split_slides=split_slides,
+            run_ocr=False,
         )
         results["slides_md"] = markdown_path
 
@@ -644,6 +645,7 @@ def process_video(
                 source_url=source_url,
                 split_slides=split_slides,
                 ai_descriptions=ai_descriptions,
+                run_ocr=False,
             )
             results["slides_md"] = markdown_path
             clear_stage_failure(output_dir, "ai_description")
