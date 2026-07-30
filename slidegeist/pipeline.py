@@ -76,6 +76,61 @@ def has_existing_slides(output_dir: Path) -> bool:
     return len(slide_files) > 0
 
 
+def slide_checkpoint_matches_diagnostics(output_dir: Path) -> bool:
+    """Check that extracted image identities cover the detector state sequence."""
+    slides_dir = output_dir / "slides"
+    if not has_existing_slides(output_dir):
+        return False
+    actual_ids: set[int] = set()
+    for path in slides_dir.iterdir():
+        if path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            continue
+        match = re.fullmatch(r"slide_(\d+)", path.stem)
+        if not match:
+            return False
+        actual_ids.add(int(match.group(1)))
+
+    diagnostics_path = output_dir / "transition_detection.json"
+    if not diagnostics_path.exists():
+        return True
+    try:
+        diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+        timestamps = diagnostics["timestamps"]
+        if not isinstance(timestamps, list):
+            return False
+        if diagnostics.get("state_filter") == "multimodal-instructional-content-v1":
+            raw_timestamps = diagnostics["raw_timestamps"]
+            rejected_states = diagnostics["rejected_states"]
+            if not isinstance(raw_timestamps, list) or not isinstance(rejected_states, list):
+                return False
+            rejected_ids = set()
+            for state in rejected_states:
+                if not isinstance(state, dict):
+                    return False
+                match = re.fullmatch(r"slide_(\d+)", str(state.get("slide_id", "")))
+                if not match:
+                    return False
+                rejected_ids.add(int(match.group(1)))
+            expected_ids = set(range(1, len(raw_timestamps) + 2)) - rejected_ids
+            if len(expected_ids) != len(timestamps) + 1:
+                return False
+        else:
+            expected_ids = set(range(1, len(timestamps) + 2))
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return actual_ids == expected_ids
+
+
+def discard_incomplete_slide_checkpoint(output_dir: Path) -> None:
+    """Remove only generated slide states proven incomplete by diagnostics."""
+    slides_dir = output_dir / "slides"
+    if not slides_dir.exists():
+        return
+    for path in slides_dir.iterdir():
+        if re.fullmatch(r"slide_\d+\.(?:jpe?g|png)(?:\.non-slide)?", path.name, re.IGNORECASE):
+            path.unlink()
+
+
 def find_video_file(output_dir: Path) -> Path | None:
     """Find video file in output directory.
 
@@ -243,7 +298,7 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
     }
 
     # Check for slides directory
-    stages["slides"] = has_existing_slides(output_dir)
+    stages["slides"] = slide_checkpoint_matches_diagnostics(output_dir)
     transcript_path = output_dir / "transcript.json"
     if transcript_path.exists():
         try:
@@ -303,9 +358,10 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
             for slide_id, data in parsed.items()
             if is_slide_description(data.get("ai_description", ""))
         }
-        stages["ai_description"] = bool(actual_ids) and (
-            set(parsed) == actual_ids == described_ids
-        )
+        stages["ai_description"] = bool(actual_ids) and (set(parsed) == actual_ids == described_ids)
+        if not stages["slides"]:
+            stages["ocr"] = False
+            stages["ai_description"] = False
 
     except Exception as e:
         logger.debug(f"Could not parse markdown for stage detection: {e}")
@@ -479,6 +535,9 @@ def process_video(
         logger.info("STEP 2: Slide Extraction")
         logger.info("=" * 60)
 
+        if has_existing_slides(output_dir):
+            logger.warning("Discarding incomplete generated slide checkpoint")
+            discard_incomplete_slide_checkpoint(output_dir)
         slide_metadata = extract_slides(video_path, scene_timestamps, output_dir, image_format)
         results["slides"] = [path for _, _, _, path in slide_metadata]
 
@@ -536,7 +595,9 @@ def process_video(
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
             error_msg += "1. Start a Whisper-compatible server on 127.0.0.1:8427\n"
-            error_msg += "   (e.g. whisper.cpp's whisper-server --inference-path /v1/audio/transcriptions)\n"
+            error_msg += (
+                "   (e.g. whisper.cpp's whisper-server --inference-path /v1/audio/transcriptions)\n"
+            )
             error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)
@@ -601,9 +662,8 @@ def process_video(
         results["slides_md"] = markdown_path
 
     # Step 5: AI Descriptions
-    should_skip_ai = (
-        (completed_stages["ai_description"] and not retry_failed)
-        or (failed_stages["ai_description"] and not retry_failed)
+    should_skip_ai = (completed_stages["ai_description"] and not retry_failed) or (
+        failed_stages["ai_description"] and not retry_failed
     )
     needs_ai = has_slides and not completed_stages["ai_description"]
 
@@ -702,9 +762,7 @@ def process_video(
         stage for stage, failed in detect_failed_stages(output_dir).items() if failed
     ]
     if remaining_failures:
-        raise RuntimeError(
-            "processing incomplete; failed stages: " + ", ".join(remaining_failures)
-        )
+        raise RuntimeError("processing incomplete; failed stages: " + ", ".join(remaining_failures))
 
     return results
 

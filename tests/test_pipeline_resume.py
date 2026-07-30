@@ -8,9 +8,11 @@ import pytest
 import slidegeist.pipeline as pipeline
 from slidegeist.pipeline import (
     detect_completed_stages,
+    discard_incomplete_slide_checkpoint,
     load_existing_slide_metadata,
     load_transcript_checkpoint,
     process_video,
+    slide_checkpoint_matches_diagnostics,
 )
 
 
@@ -22,23 +24,16 @@ def _write_slide(output: Path, number: int) -> None:
 
 def _section(number: int, description: str = "") -> str:
     description_section = (
-        f"### AI Description (for reconstruction)\n\n{description}\n\n"
-        if description
-        else ""
+        f"### AI Description (for reconstruction)\n\n{description}\n\n" if description else ""
     )
-    return (
-        f'<a name="slide_{number:03d}"></a>\n\n'
-        f"## Slide {number}\n\n"
-        f"{description_section}---\n"
-    )
+    return f'<a name="slide_{number:03d}"></a>\n\n## Slide {number}\n\n{description_section}---\n'
 
 
 def test_partial_ai_descriptions_remain_resumable(tmp_path: Path) -> None:
     _write_slide(tmp_path, 1)
     _write_slide(tmp_path, 2)
     (tmp_path / "slides.md").write_text(
-        _section(1, "0. FRAME TYPE\nSLIDE\n\nComplete first description")
-        + _section(2),
+        _section(1, "0. FRAME TYPE\nSLIDE\n\nComplete first description") + _section(2),
         encoding="utf-8",
     )
 
@@ -194,14 +189,70 @@ def test_resume_rejects_nonfinite_detector_timestamps(tmp_path: Path) -> None:
     ]
 
 
+def test_interrupted_extraction_does_not_advance_downstream(tmp_path: Path) -> None:
+    """Sixteen frames cannot satisfy an independent 151-state detector oracle."""
+    for number in range(1, 17):
+        _write_slide(tmp_path, number)
+    (tmp_path / "transition_detection.json").write_text(
+        json.dumps({"timestamps": [float(number) for number in range(1, 151)]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "slides.md").write_text(
+        "".join(
+            _section(number, "0. FRAME TYPE\nSLIDE\n\nKnown partial state")
+            + "\n### OCR Text\nKnown partial OCR\n"
+            for number in range(1, 17)
+        ),
+        encoding="utf-8",
+    )
+
+    stages = detect_completed_stages(tmp_path)
+
+    assert stages["slides"] is False
+    assert stages["ocr"] is False
+    assert stages["ai_description"] is False
+
+
+def test_filtered_checkpoint_accepts_original_identities_with_rejected_gaps(
+    tmp_path: Path,
+) -> None:
+    _write_slide(tmp_path, 1)
+    _write_slide(tmp_path, 3)
+    (tmp_path / "transition_detection.json").write_text(
+        json.dumps(
+            {
+                "timestamps": [20.0],
+                "raw_timestamps": [10.0, 20.0],
+                "state_filter": "multimodal-instructional-content-v1",
+                "rejected_states": [{"slide_id": "slide_002"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert slide_checkpoint_matches_diagnostics(tmp_path)
+
+
+def test_incomplete_slide_cleanup_is_scoped_to_generated_states(tmp_path: Path) -> None:
+    _write_slide(tmp_path, 1)
+    rejected = tmp_path / "slides" / "slide_002.jpg.non-slide"
+    rejected.write_bytes(b"rejected generated state")
+    unrelated = tmp_path / "slides" / "instructor-portrait.jpg"
+    unrelated.write_bytes(b"user image")
+
+    discard_incomplete_slide_checkpoint(tmp_path)
+
+    assert not (tmp_path / "slides" / "slide_001.jpg").exists()
+    assert not rejected.exists()
+    assert unrelated.exists()
+
+
 def test_unretried_failed_stage_returns_a_processing_error(tmp_path: Path) -> None:
     video = tmp_path / "known.mp4"
     video.write_bytes(b"known video placeholder")
     _write_slide(tmp_path, 1)
     (tmp_path / "transcript.json").write_text(
-        json.dumps(
-            {"segments": [{"start": 0.0, "end": 1.0, "text": "Known speech"}]}
-        ),
+        json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "Known speech"}]}),
         encoding="utf-8",
     )
     (tmp_path / "slides.md").write_text(
