@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 from pathlib import Path
 
 from slidegeist.constants import (
@@ -13,7 +14,7 @@ from slidegeist.constants import (
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.export import export_slides_json
-from slidegeist.ffmpeg import detect_scenes
+from slidegeist.ffmpeg import FFmpegError, detect_scenes, get_video_duration
 from slidegeist.ocr import OcrPipeline
 from slidegeist.slides import extract_slides
 from slidegeist.transcribe import Segment, Word, transcribe_video
@@ -106,13 +107,16 @@ def can_resume_from_slides(output_dir: Path) -> bool:
     return find_video_file(output_dir) is not None and has_existing_slides(output_dir)
 
 
-def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, float, Path]]:
+def load_existing_slide_metadata(
+    output_dir: Path, video_path: Path | None = None
+) -> list[tuple[int, float, float, Path]]:
     """Load metadata for existing slides in output directory.
 
     Parses slides.md or index.md to extract timing information.
 
     Args:
         output_dir: Directory containing slides subdirectory.
+        video_path: Optional source video used to recover the exact final boundary.
 
     Returns:
         List of tuples (slide_number, start_time, end_time, path) for each slide.
@@ -149,7 +153,9 @@ def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, flo
                 timing_info[slide_id] = (t_start, t_end)
 
             # Pattern 2: **Time:** format (combined mode)
-            time_pattern = r'<a name="(slide_\d+)"></a>.*?\*\*Time:\*\*\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)'
+            time_pattern = (
+                r'<a name="(slide_\d+)"></a>.*?\*\*Time:\*\*\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)'
+            )
             for match in re.finditer(time_pattern, content, re.DOTALL):
                 slide_id = match.group(1)
                 start_min, start_sec = int(match.group(2)), int(match.group(3))
@@ -160,6 +166,39 @@ def load_existing_slide_metadata(output_dir: Path) -> list[tuple[int, float, flo
 
         except Exception as e:
             logger.debug(f"Could not parse timing info from markdown: {e}")
+
+    diagnostics_path = output_dir / "transition_detection.json"
+    if diagnostics_path.exists():
+        try:
+            diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+            timestamps = [float(value) for value in diagnostics["timestamps"]]
+            if len(timestamps) == len(slide_files) - 1:
+                video_end = diagnostics.get("state_filter_video_end")
+                if not isinstance(video_end, (int, float)) and video_path is not None:
+                    video_end = get_video_duration(video_path)
+                if not isinstance(video_end, (int, float)) and slide_files:
+                    last_timing = timing_info.get(slide_files[-1].stem)
+                    video_end = last_timing[1] if last_timing else None
+                valid_video_end = (
+                    isinstance(video_end, (int, float))
+                    and not isinstance(video_end, bool)
+                    and math.isfinite(video_end)
+                )
+                valid_timestamps = all(math.isfinite(value) for value in timestamps)
+                numeric_video_end = float(video_end) if valid_video_end else 0.0
+                boundaries = [0.0, *timestamps, numeric_video_end]
+                strictly_increasing = all(
+                    left < right for left, right in zip(boundaries, boundaries[1:])
+                )
+                if valid_video_end and valid_timestamps and strictly_increasing:
+                    starts = [0.0, *timestamps]
+                    ends = [*timestamps, numeric_video_end]
+                    return [
+                        (index, starts[index - 1], ends[index - 1], slide_path)
+                        for index, slide_path in enumerate(slide_files, start=1)
+                    ]
+        except (FFmpegError, KeyError, OSError, TypeError, ValueError):
+            logger.debug("Ignoring invalid transition timing checkpoint")
 
     metadata: list[tuple[int, float, float, Path]] = []
     for idx, slide_path in enumerate(slide_files, start=1):
@@ -405,7 +444,7 @@ def process_video(
         logger.info("=" * 60)
         logger.info("STEP 1: Loading existing slides")
         logger.info("=" * 60)
-        slide_metadata = load_existing_slide_metadata(output_dir)
+        slide_metadata = load_existing_slide_metadata(output_dir, video_path)
         results["slides"] = [path for _, _, _, path in slide_metadata]
         logger.info(f"Loaded {len(slide_metadata)} existing slides")
     elif not skip_slides:

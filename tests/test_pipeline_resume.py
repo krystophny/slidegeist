@@ -7,6 +7,7 @@ import pytest
 
 from slidegeist.pipeline import (
     detect_completed_stages,
+    load_existing_slide_metadata,
     load_transcript_checkpoint,
     process_video,
 )
@@ -128,6 +129,55 @@ def test_resume_loads_timed_transcript_context(tmp_path: Path) -> None:
             "text": "The magnetic moment is conserved.",
             "words": [{"word": "moment", "start": 12.9, "end": 13.2}],
         }
+    ]
+
+
+def test_resume_prefers_exact_detector_timestamps_over_markdown_display(
+    tmp_path: Path,
+) -> None:
+    _write_slide(tmp_path, 1)
+    _write_slide(tmp_path, 2)
+    (tmp_path / "slides.md").write_text(
+        '<a name="slide_001"></a>\n**Time:** 00:00 - 00:12\n---\n'
+        '<a name="slide_002"></a>\n**Time:** 00:12 - 00:30\n---\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "transition_detection.json").write_text(
+        json.dumps(
+            {
+                "timestamps": [12.375],
+                "state_filter_video_end": 30.625,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    metadata = load_existing_slide_metadata(tmp_path)
+
+    assert [(start, end) for _, start, end, _ in metadata] == [
+        (0.0, 12.375),
+        (12.375, 30.625),
+    ]
+
+
+def test_resume_rejects_nonfinite_detector_timestamps(tmp_path: Path) -> None:
+    _write_slide(tmp_path, 1)
+    _write_slide(tmp_path, 2)
+    (tmp_path / "slides.md").write_text(
+        '<a name="slide_001"></a>\n**Time:** 00:00 - 00:12\n---\n'
+        '<a name="slide_002"></a>\n**Time:** 00:12 - 00:30\n---\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "transition_detection.json").write_text(
+        '{"timestamps": [NaN], "state_filter_video_end": 30.625}\n',
+        encoding="utf-8",
+    )
+
+    metadata = load_existing_slide_metadata(tmp_path)
+
+    assert [(start, end) for _, start, end, _ in metadata] == [
+        (0.0, 12.0),
+        (12.0, 30.0),
     ]
 
 
