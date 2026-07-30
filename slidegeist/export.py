@@ -50,7 +50,10 @@ def _parse_existing_markdown(markdown_path: Path) -> dict[str, dict[str, str]]:
             # Extract slide ID
             try:
                 current_slide_id = line.split('name="')[1].split('"')[0]
-                slides_data.setdefault(current_slide_id, {"transcript": "", "ocr": "", "visual_elements": "", "ai_description": ""})
+                slides_data.setdefault(
+                    current_slide_id,
+                    {"transcript": "", "ocr": "", "visual_elements": "", "ai_description": ""},
+                )
                 current_section = None
             except Exception:
                 current_slide_id = None
@@ -139,6 +142,7 @@ def export_slides_json(
     # Build default OCR pipeline if none provided
     if ocr_pipeline is None:
         from slidegeist.ocr import build_default_ocr_pipeline
+
         ocr_pipeline = build_default_ocr_pipeline()
 
     # Read existing markdown to preserve/merge content
@@ -151,15 +155,15 @@ def export_slides_json(
         logger.info("Creating slides markdown with %d slides", len(slide_metadata))
 
     # Process all slides and collect data
-    from tqdm import tqdm
+    from tqdm import tqdm  # type: ignore[import-untyped]
 
     slide_sections: list[str] = []
     index_lines: list[str] = []
     total_slides = len(slide_metadata)
 
-    for index, (slide_index, t_start, t_end, image_path) in enumerate(tqdm(
-        slide_metadata, desc="Processing slides", unit="slide", disable=not ocr_pipeline
-    )):
+    for index, (slide_index, t_start, t_end, image_path) in enumerate(
+        tqdm(slide_metadata, desc="Processing slides", unit="slide", disable=not ocr_pipeline)
+    ):
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
         image_filename = image_path.name
 
@@ -348,35 +352,43 @@ def _build_slide_section(
     ]
 
     if transcript_text:
-        lines.extend([
-            "### Transcript",
-            "",
-            transcript_text,
-            "",
-        ])
+        lines.extend(
+            [
+                "### Transcript",
+                "",
+                transcript_text,
+                "",
+            ]
+        )
 
     if ocr_text:
-        lines.extend([
-            "### OCR Text",
-            "",
-            ocr_text,
-            "",
-        ])
+        lines.extend(
+            [
+                "### OCR Text",
+                "",
+                ocr_text,
+                "",
+            ]
+        )
 
     if visual_elements:
         elements_str = ", ".join(visual_elements)
-        lines.extend([
-            f"**Visual Elements:** {elements_str}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"**Visual Elements:** {elements_str}",
+                "",
+            ]
+        )
 
     if ai_description:
-        lines.extend([
-            "### AI Description (for reconstruction)",
-            "",
-            ai_description,
-            "",
-        ])
+        lines.extend(
+            [
+                "### AI Description (for reconstruction)",
+                "",
+                ai_description,
+                "",
+            ]
+        )
 
     lines.append("---")
     lines.append("")
@@ -411,35 +423,43 @@ def _build_slide_markdown(
     ]
 
     if transcript_text:
-        lines.extend([
-            "## Transcript",
-            "",
-            transcript_text,
-            "",
-        ])
+        lines.extend(
+            [
+                "## Transcript",
+                "",
+                transcript_text,
+                "",
+            ]
+        )
 
     if ocr_text:
-        lines.extend([
-            "## OCR Text",
-            "",
-            ocr_text,
-            "",
-        ])
+        lines.extend(
+            [
+                "## OCR Text",
+                "",
+                ocr_text,
+                "",
+            ]
+        )
 
     if visual_elements:
         elements_str = ", ".join(visual_elements)
-        lines.extend([
-            f"**Visual Elements:** {elements_str}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"**Visual Elements:** {elements_str}",
+                "",
+            ]
+        )
 
     if ai_description:
-        lines.extend([
-            "## AI Description (for reconstruction)",
-            "",
-            ai_description,
-            "",
-        ])
+        lines.extend(
+            [
+                "## AI Description (for reconstruction)",
+                "",
+                ai_description,
+                "",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -464,14 +484,16 @@ def _build_combined_markdown(
     duration_str = _format_timestamp(duration)
     processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    lines.extend([
-        f"**Duration:** {duration_str}  ",
-        f"**Transcription Model:** {model}  ",
-        f"**Processed:** {processed_at}",
-        "",
-        "---",
-        "",
-    ])
+    lines.extend(
+        [
+            f"**Duration:** {duration_str}  ",
+            f"**Transcription Model:** {model}  ",
+            f"**Processed:** {processed_at}",
+            "",
+            "---",
+            "",
+        ]
+    )
 
     lines.extend(slide_sections)
 
@@ -515,7 +537,9 @@ def run_ai_descriptions(
             if existing_count == total_slides:
                 logger.info(f"All {total_slides} slides have AI descriptions, will skip generation")
             else:
-                logger.info(f"Found {existing_count}/{total_slides} existing AI descriptions, will skip those and generate the rest")
+                logger.info(
+                    f"Found {existing_count}/{total_slides} existing AI descriptions, will skip those and generate the rest"
+                )
     elif force_redo:
         logger.info("Force redo enabled: regenerating ALL AI descriptions")
 
@@ -525,7 +549,11 @@ def run_ai_descriptions(
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
 
         # Skip if already has AI description (unless force_redo)
-        if not force_redo and slide_id in existing_data and existing_data[slide_id].get("ai_description"):
+        if (
+            not force_redo
+            and slide_id in existing_data
+            and existing_data[slide_id].get("ai_description")
+        ):
             descriptions[slide_id] = existing_data[slide_id]["ai_description"]
             logger.debug(f"Skipping {slide_id} (already has AI description)")
             continue
@@ -561,10 +589,7 @@ def run_ai_descriptions(
 
 
 def _save_incremental_ai_description(
-    output_path: Path,
-    slide_id: str,
-    ai_description: str,
-    existing_data: dict[str, dict[str, str]]
+    output_path: Path, slide_id: str, ai_description: str, existing_data: dict[str, dict[str, str]]
 ) -> None:
     """Update slides.md with new AI description for a single slide.
 
@@ -621,7 +646,7 @@ def _save_incremental_ai_description(
                     break
             # Remove old section
             del lines[ai_section_start:ai_section_end]
-            next_slide_start -= (ai_section_end - ai_section_start)
+            next_slide_start -= ai_section_end - ai_section_start
             separator_line = ai_section_start if separator_line else None
 
         # Insert new AI description before separator
@@ -662,14 +687,16 @@ def _build_index_markdown(
     duration_str = _format_timestamp(duration)
     processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    lines.extend([
-        f"**Duration:** {duration_str}  ",
-        f"**Transcription Model:** {model}  ",
-        f"**Processed:** {processed_at}",
-        "",
-        "## Slides",
-        "",
-    ])
+    lines.extend(
+        [
+            f"**Duration:** {duration_str}  ",
+            f"**Transcription Model:** {model}  ",
+            f"**Processed:** {processed_at}",
+            "",
+            "## Slides",
+            "",
+        ]
+    )
 
     lines.extend(slide_lines)
     lines.append("")

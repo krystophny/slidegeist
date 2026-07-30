@@ -84,7 +84,8 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
     if not segments:
         text = str(payload.get("text", "")).strip()
         if text:
-            duration = float(payload.get("duration", 0.0))
+            raw_duration = payload.get("duration", 0.0)
+            duration = float(raw_duration) if isinstance(raw_duration, (int, float, str)) else 0.0
             segments.append(
                 {
                     "start": 0.0,
@@ -103,18 +104,30 @@ def _normalize_transcript(payload: dict[str, object]) -> TranscriptResult:
 CHUNK_DURATION_S = 120  # 2-minute chunks to stay within server upload limits
 
 
-def _split_audio_chunks(audio_path: Path, chunk_dir: Path,
-                        chunk_duration: int = CHUNK_DURATION_S) -> list[Path]:
+def _split_audio_chunks(
+    audio_path: Path, chunk_dir: Path, chunk_duration: int = CHUNK_DURATION_S
+) -> list[Path]:
     """Split a WAV file into fixed-length chunks using ffmpeg segment muxer."""
     import subprocess as _sp
 
     chunk_dir.mkdir(parents=True, exist_ok=True)
     pattern = str(chunk_dir / "chunk_%04d.wav")
     cmd = [
-        "ffmpeg", "-i", str(audio_path),
-        "-f", "segment", "-segment_time", str(chunk_duration),
-        "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
-        "-y", pattern,
+        "ffmpeg",
+        "-i",
+        str(audio_path),
+        "-f",
+        "segment",
+        "-segment_time",
+        str(chunk_duration),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-acodec",
+        "pcm_s16le",
+        "-y",
+        pattern,
     ]
     _sp.run(cmd, check=True, capture_output=True, text=True)
     chunks = sorted(chunk_dir.glob("chunk_*.wav"))
@@ -141,11 +154,12 @@ def transcribe_video(
         video_duration = None
         logger.warning("Could not determine video duration before transcription: %s", exc)
     else:
-        logger.info(
-            "Video duration: %.1f minutes (%.1f seconds)",
-            video_duration / 60.0,
-            video_duration,
-        )
+        if video_duration is not None:
+            logger.info(
+                "Video duration: %.1f minutes (%.1f seconds)",
+                video_duration / 60.0,
+                video_duration,
+            )
 
     with TemporaryDirectory(prefix="slidegeist-whisper-") as temp_dir:
         temp = Path(temp_dir)
@@ -161,7 +175,10 @@ def transcribe_video(
             offset = idx * CHUNK_DURATION_S
             logger.info(
                 "Transcribing chunk %d/%d (offset %.0fs) with model %s",
-                idx + 1, len(chunks), offset, model_size,
+                idx + 1,
+                len(chunks),
+                offset,
+                model_size,
             )
             try:
                 payload = whisper_transcribe(chunk_path, model=model_size)
@@ -187,6 +204,7 @@ def transcribe_video(
         "language": detected_language,
         "segments": all_segments,
     }
-    logger.info("Whisper transcription complete: %d segments from %d chunks",
-                len(all_segments), len(chunks))
+    logger.info(
+        "Whisper transcription complete: %d segments from %d chunks", len(all_segments), len(chunks)
+    )
     return result

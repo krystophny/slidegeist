@@ -63,11 +63,13 @@ class OcrPipeline:
         if self._primary is not None and self._primary.is_available:
             try:
                 extracted = self._primary.extract(image_path)
-                result.update({
-                    "engine": extracted.get("engine", result["engine"]),
-                    "raw_text": extracted.get("raw_text", ""),
-                    "blocks": extracted.get("blocks", []),
-                })
+                result.update(
+                    {
+                        "engine": extracted.get("engine", result["engine"]),
+                        "raw_text": extracted.get("raw_text", ""),
+                        "blocks": extracted.get("blocks", []),
+                    }
+                )
                 result["final_text"] = result["raw_text"]
             except Exception as exc:  # pragma: no cover - defensive log path
                 logger.warning("Tesseract OCR failed for %s: %s", image_path, exc)
@@ -80,7 +82,7 @@ class TesseractExtractor:
 
     def __init__(self) -> None:
         try:
-            import pytesseract
+            import pytesseract  # type: ignore[import-untyped]
         except ImportError:
             self._pytesseract = None
             self._version = None
@@ -137,17 +139,19 @@ class TesseractExtractor:
                 continue
 
             raw_lines.append(text)
-            blocks.append({
-                "text": text,
-                "confidence": confidence,
-                "bbox": [
-                    int(data.get("left", [0])[idx]),
-                    int(data.get("top", [0])[idx]),
-                    int(data.get("width", [0])[idx]),
-                    int(data.get("height", [0])[idx]),
-                ],
-                "level": int(data.get("level", [5])[idx]),
-            })
+            blocks.append(
+                {
+                    "text": text,
+                    "confidence": confidence,
+                    "bbox": [
+                        int(data.get("left", [0])[idx]),
+                        int(data.get("top", [0])[idx]),
+                        int(data.get("width", [0])[idx]),
+                        int(data.get("height", [0])[idx]),
+                    ],
+                    "level": int(data.get("level", [5])[idx]),
+                }
+            )
 
         return {
             "engine": {

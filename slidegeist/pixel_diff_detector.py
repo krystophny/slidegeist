@@ -12,6 +12,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -20,10 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 def _preprocess_video_if_needed(
-    video_path: Path,
-    max_resolution: int,
-    target_fps: float
-) -> tuple[Path, object | None, float]:
+    video_path: Path, max_resolution: int, target_fps: float
+) -> tuple[Path, Any | None, float]:
     """Return optimized video for processing if scaling or decimation is needed."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -104,7 +103,7 @@ def detect_slides_pixel_diff(
     threshold: float = 0.02,
     sample_interval: float = 1.0,
     max_resolution: int = 360,
-    target_fps: float = 5.0
+    target_fps: float = 5.0,
 ) -> list[float]:
     """Detect slide changes using Global Pixel Difference method.
 
@@ -143,9 +142,7 @@ def detect_slides_pixel_diff(
     cap.release()
 
     if fps <= 0:
-        logger.warning(
-            "Input video reported non-positive FPS (%.3f). Falling back to 30 FPS.", fps
-        )
+        logger.warning("Input video reported non-positive FPS (%.3f). Falling back to 30 FPS.", fps)
         fps = 30.0
 
     logger.info(
@@ -171,15 +168,15 @@ def detect_slides_pixel_diff(
         # Build filter string
         filters = []
         if scale < 1.0:
-            filters.append(f'scale={new_width}:{new_height}')
+            filters.append(f"scale={new_width}:{new_height}")
         if fps > target_fps:
             # Use integer ratio for fps to avoid encoding issues
             fps_ratio = int(round(fps / target_fps))
             actual_fps = fps / fps_ratio
-            filters.append(f'fps=fps={actual_fps}')
+            filters.append(f"fps=fps={actual_fps}")
             working_fps = actual_fps
 
-        filter_str = ','.join(filters)
+        filter_str = ",".join(filters)
 
         logger.info(
             f"Preprocessing video: {width}x{height}@{fps:.2f}fps -> "
@@ -187,14 +184,23 @@ def detect_slides_pixel_diff(
         )
 
         # Create temporary optimized video
-        temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         temp_file.close()
 
         cmd = [
-            'ffmpeg', '-i', str(video_path),
-            '-vf', filter_str,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-            '-y', temp_file.name
+            "ffmpeg",
+            "-i",
+            str(video_path),
+            "-vf",
+            filter_str,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-y",
+            temp_file.name,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -245,9 +251,7 @@ def detect_slides_pixel_diff(
 
             # Convert to grayscale and binarize
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(
-                gray, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-            )
+            _, binary = cv2.threshold(gray, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
             if prev_frame_binary is not None:
                 # Compute pixel-level difference
@@ -349,23 +353,32 @@ def detect_slides_adaptive(
 
         filters = []
         if scale < 1.0:
-            filters.append(f'scale={new_width}:{new_height}')
+            filters.append(f"scale={new_width}:{new_height}")
         if fps > target_fps:
             fps_ratio = int(round(fps / target_fps))
             actual_fps = fps / fps_ratio
-            filters.append(f'fps=fps={actual_fps}')
+            filters.append(f"fps=fps={actual_fps}")
             working_fps = actual_fps
 
-        filter_str = ','.join(filters)
+        filter_str = ",".join(filters)
 
-        temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         temp_file.close()
 
         cmd = [
-            'ffmpeg', '-i', str(video_path),
-            '-vf', filter_str,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-            '-y', temp_file.name
+            "ffmpeg",
+            "-i",
+            str(video_path),
+            "-vf",
+            filter_str,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-y",
+            temp_file.name,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -450,8 +463,7 @@ def detect_slides_adaptive(
     optimal_count = slide_counts[best_threshold_idx]
 
     logger.info(
-        f"Adaptive threshold selected: {optimal_threshold:.3f} "
-        f"({optimal_count} slides detected)"
+        f"Adaptive threshold selected: {optimal_threshold:.3f} ({optimal_count} slides detected)"
     )
 
     # Step 4: Apply optimal threshold to get final timestamps
@@ -496,21 +508,28 @@ def _find_optimal_threshold_idx(slide_counts: list[int], thresholds: np.ndarray)
             current_plateau_len += 1
         else:
             # Save current plateau
-            avg_count = sum(slide_counts[current_plateau_start:current_plateau_start + current_plateau_len]) / current_plateau_len
+            avg_count = (
+                sum(
+                    slide_counts[
+                        current_plateau_start : current_plateau_start + current_plateau_len
+                    ]
+                )
+                / current_plateau_len
+            )
             plateaus.append((current_plateau_start, current_plateau_len, avg_count))
             current_plateau_start = i
             current_plateau_len = 1
 
     # Add final plateau
-    avg_count = sum(slide_counts[current_plateau_start:current_plateau_start + current_plateau_len]) / current_plateau_len
+    avg_count = (
+        sum(slide_counts[current_plateau_start : current_plateau_start + current_plateau_len])
+        / current_plateau_len
+    )
     plateaus.append((current_plateau_start, current_plateau_len, avg_count))
 
     # Score plateaus: heavily prefer higher slide counts (avoid under-detection)
     # Score = slide_count^1.5 * length - prioritize slide count over stability
-    best_plateau = max(
-        plateaus,
-        key=lambda p: (p[2] ** 1.5) * p[1] if p[2] > 0 else 0
-    )
+    best_plateau = max(plateaus, key=lambda p: (p[2] ** 1.5) * p[1] if p[2] > 0 else 0)
 
     best_start, best_len, best_avg = best_plateau
 
@@ -534,7 +553,7 @@ def detect_slides_normalized(
     window_seconds: float = 7.0,
     sample_interval: float = 1.0,
     max_resolution: int = 360,
-    target_fps: float = 5.0
+    target_fps: float = 5.0,
 ) -> list[float]:
     """Detect slide changes using rolling window normalization.
 
@@ -607,14 +626,10 @@ def detect_slides_normalized(
 
             # Convert to grayscale and binarize
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(
-                gray, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-            )
+            _, binary = cv2.threshold(gray, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
             if prev_frame_binary is not None:
-                diff = np.abs(
-                    binary.astype(np.int16) - prev_frame_binary.astype(np.int16)
-                )
+                diff = np.abs(binary.astype(np.int16) - prev_frame_binary.astype(np.int16))
                 raw_diff = np.count_nonzero(diff) / binary.size
                 frame_diffs.append((frame_num, raw_diff))
 

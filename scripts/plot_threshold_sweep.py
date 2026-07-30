@@ -8,17 +8,15 @@ Usage:
 """
 
 import argparse
-import logging
 import sys
 import tempfile
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 # Import labeled videos from test file
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from tests.test_labeled_videos import LABELED_VIDEOS, get_video_path, download_video
+from tests.test_labeled_videos import LABELED_VIDEOS, download_video
 
 # Minimal plotting - works without matplotlib
 try:
@@ -31,8 +29,8 @@ except ImportError:
 
 # Optional PySceneDetect
 try:
-    from scenedetect import detect, ContentDetector, SceneManager, open_video
-    from scenedetect.detectors import HistogramDetector, HashDetector
+    from scenedetect import ContentDetector, SceneManager, open_video
+    from scenedetect.detectors import HashDetector, HistogramDetector
     from scenedetect.stats_manager import StatsManager
     HAS_PYSCENEDETECT = True
 except ImportError:
@@ -45,9 +43,7 @@ def compute_frame_diffs(video_path: Path) -> tuple[list[tuple[int, float]], floa
     Returns:
         (frame_diffs, working_fps) where frame_diffs is list of (frame_num, diff_value)
     """
-    from slidegeist.pixel_diff_detector import (
-        cv2, np, subprocess, tempfile, os
-    )
+    from slidegeist.pixel_diff_detector import cv2, np, os, subprocess, tempfile
 
     # Simplified version of preprocessing from detect_slides_adaptive
     cap = cv2.VideoCapture(str(video_path))
@@ -116,7 +112,7 @@ def compute_frame_diffs(video_path: Path) -> tuple[list[tuple[int, float]], floa
 
     try:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        print(f"Computing frame differences...")
+        print("Computing frame differences...")
 
         while frame_num < total_frames:
             ret, frame = cap.read()
@@ -329,7 +325,7 @@ def compute_pyscenedetect_scores(video_path: Path, detector_name: str) -> tuple[
         # Read stats file - find column matching metric prefix
         import csv
         score_vals = []
-        with open(stats_file, 'r') as f:
+        with open(stats_file) as f:
             reader = csv.DictReader(f)
             # Find actual column name (may have parameters in brackets)
             if reader.fieldnames:
@@ -487,7 +483,7 @@ def plot_sweep(
             opt_thresh_sg = normalized_thresholds_sg[idx_sg]
             ax.plot(opt_thresh_sg, slide_counts[idx_sg], 'b*', markersize=15,
                    markeredgecolor='white', markeredgewidth=1.5, zorder=20,
-                   label=f'slidegeist optimal')
+                   label='slidegeist optimal')
 
         # PySceneDetect methods
         if pyscene_results:
@@ -517,7 +513,7 @@ def plot_sweep(
                 ax.plot(opt_thresh_z_norm, z_slide_counts[idx_z], '*',
                        color='purple', markersize=15,
                        markeredgecolor='white', markeredgewidth=1.5, zorder=20,
-                       label=f'z-score optimal')
+                       label='z-score optimal')
 
         # Opencast-style optimization marker
         if opencast_result:
@@ -549,7 +545,7 @@ def plot_sweep(
     # Try to display
     try:
         plt.show()
-    except:
+    except Exception:
         print("(Cannot display plot - saved to file)")
 
 

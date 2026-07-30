@@ -45,9 +45,7 @@ def get_llama_cpp_max_image_dimension() -> int:
     try:
         value = int(raw)
     except ValueError as exc:
-        raise ValueError(
-            "SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION must be an integer"
-        ) from exc
+        raise ValueError("SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION must be an integer") from exc
     if value < 256:
         raise ValueError("SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION must be at least 256")
     return value
@@ -96,7 +94,7 @@ def _http_status(url: str, timeout: float = 2.0) -> int:
     """Return the HTTP status code for a lightweight probe request."""
     try:
         with request.urlopen(url, timeout=timeout) as response:
-            return response.status
+            return int(response.status)
     except error.HTTPError as exc:
         return exc.code
     except error.URLError:
@@ -255,6 +253,8 @@ def _build_multipart_prefix(
 
 def _connection_for(url: parse.SplitResult, timeout: float) -> HTTPConnection | HTTPSConnection:
     """Create an HTTP or HTTPS connection for the given parsed URL."""
+    if url.hostname is None:
+        raise ValueError(f"HTTP endpoint has no hostname: {url.geturl()}")
     port = url.port
     if url.scheme == "https":
         return HTTPSConnection(url.hostname, port, timeout=timeout)
