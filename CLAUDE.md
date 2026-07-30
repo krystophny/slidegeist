@@ -53,6 +53,8 @@ Health probes hit `/health` first; Whisper falls back to probing
 For multimodal requests, `SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION` limits the
 longest edge of the service copy (default 1024 pixels) while preserving the
 full-resolution extracted frame on disk.
+`SLIDEGEIST_LLAMACPP_MAX_TOKENS` sets the reconstruction response ceiling
+(default 1024, minimum 256).
 
 ### Recommended Whisper server: whisper.cpp
 

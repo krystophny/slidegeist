@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from slidegeist.services import (
+    get_llama_cpp_max_tokens,
     get_llama_cpp_model,
     get_llama_cpp_model_override,
     llama_cpp_complete,
@@ -99,12 +100,14 @@ class LlamaCppSlideDescriber(BaseSlideDescriber):
 
     def __init__(
         self,
-        max_new_tokens: int = 1536,
+        max_new_tokens: int | None = None,
         temperature: float = 0.0,
     ) -> None:
         model_id = get_llama_cpp_model_override() or get_llama_cpp_model() or "unknown"
         self.name = f"{model_id} (llama.cpp)"
-        self.max_new_tokens = max_new_tokens
+        self.max_new_tokens = (
+            get_llama_cpp_max_tokens() if max_new_tokens is None else max_new_tokens
+        )
         self.temperature = temperature
 
     def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:

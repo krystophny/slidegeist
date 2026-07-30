@@ -51,6 +51,18 @@ def get_llama_cpp_max_image_dimension() -> int:
     return value
 
 
+def get_llama_cpp_max_tokens() -> int:
+    """Return the maximum reconstruction tokens requested from llama.cpp."""
+    raw = os.getenv("SLIDEGEIST_LLAMACPP_MAX_TOKENS", "1024")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("SLIDEGEIST_LLAMACPP_MAX_TOKENS must be an integer") from exc
+    if value < 256:
+        raise ValueError("SLIDEGEIST_LLAMACPP_MAX_TOKENS must be at least 256")
+    return value
+
+
 def _image_data_url(image_path: Path) -> str:
     """Encode an image, shrinking only the service copy when it exceeds the limit."""
     max_dimension = get_llama_cpp_max_image_dimension()

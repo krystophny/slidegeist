@@ -1,6 +1,12 @@
-"""Behavioral tests for slide-description text handling."""
+"""Behavioral tests for slide-description text handling and configuration."""
 
-from slidegeist.ai_description import clean_text, get_user_prompt
+import pytest
+
+from slidegeist.ai_description import (
+    LlamaCppSlideDescriber,
+    clean_text,
+    get_user_prompt,
+)
 
 
 def test_clean_text_preserves_reconstruction_sections() -> None:
@@ -29,3 +35,22 @@ def test_prompt_defines_non_instructional_ui_as_non_slide() -> None:
     assert "If the frame type is SLIDE, continue" in prompt
     assert "Aim for at most 200 words" in prompt
     assert "do not repeat TEXT CONTENT" in prompt
+
+
+def test_description_token_budget_is_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "oracle")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MAX_TOKENS", "640")
+
+    assert LlamaCppSlideDescriber().max_new_tokens == 640
+
+
+def test_description_token_budget_rejects_too_small_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "oracle")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MAX_TOKENS", "128")
+
+    with pytest.raises(ValueError, match="must be at least 256"):
+        LlamaCppSlideDescriber()

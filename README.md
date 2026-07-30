@@ -257,6 +257,8 @@ Set `SLIDEGEIST_LLAMACPP_MODEL` when the endpoint exposes more than one model.
 `SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION` controls the longest edge of the
 multimodal request image (default: 1024). This reduces service latency without
 changing the full-resolution extracted slide stored on disk.
+`SLIDEGEIST_LLAMACPP_MAX_TOKENS` controls the reconstruction response ceiling
+(default: 1024; minimum: 256). Formula-heavy slides may need the default.
 
 For example:
 
@@ -264,6 +266,7 @@ For example:
 export SLIDEGEIST_LLAMACPP_URL=http://model-host:8080
 export SLIDEGEIST_LLAMACPP_MODEL=qwen27b
 export SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION=1024
+export SLIDEGEIST_LLAMACPP_MAX_TOKENS=1024
 export SLIDEGEIST_WHISPER_URL=http://127.0.0.1:8427
 ```
 
