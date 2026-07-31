@@ -715,38 +715,37 @@ def _save_incremental_ai_description(
                 next_slide_start = i
                 break
 
-        # Find or insert AI description section
-        ai_section_start = None
-        separator_line = None
-        for i in range(slide_start, next_slide_start):
-            if lines[i].strip() == "### AI Description (for reconstruction)":
-                ai_section_start = i
-                break
-            if lines[i].strip() == "---":
-                separator_line = i
-
-        # Remove old AI description if it exists
-        if ai_section_start is not None:
-            # Find end of AI section (next ### or ---)
-            ai_section_end = separator_line if separator_line else next_slide_start
-            for i in range(ai_section_start + 1, next_slide_start):
-                if lines[i].strip().startswith("###") or lines[i].strip() == "---":
-                    ai_section_end = i
+        # Remove every stale checkpoint section. An interrupted retry can leave
+        # more than one, including sections accidentally appended after the
+        # slide separator.
+        slide_lines = lines[slide_start:next_slide_start]
+        cleaned: list[str] = []
+        position = 0
+        heading = "### AI Description (for reconstruction)"
+        while position < len(slide_lines):
+            if slide_lines[position].strip() != heading:
+                cleaned.append(slide_lines[position])
+                position += 1
+                continue
+            position += 1
+            while position < len(slide_lines):
+                marker = slide_lines[position].strip()
+                if marker.startswith("###") or marker == "---":
                     break
-            # Remove old section
-            del lines[ai_section_start:ai_section_end]
-            next_slide_start -= ai_section_end - ai_section_start
-            separator_line = ai_section_start if separator_line else None
+                position += 1
 
-        # Insert new AI description before separator
-        insert_pos = separator_line if separator_line else next_slide_start
+        separator_line = next(
+            (index for index in range(len(cleaned) - 1, -1, -1) if cleaned[index].strip() == "---"),
+            len(cleaned),
+        )
         new_section = [
-            "### AI Description (for reconstruction)",
+            heading,
             "",
             ai_description,
             "",
         ]
-        lines[insert_pos:insert_pos] = new_section
+        cleaned[separator_line:separator_line] = new_section
+        lines[slide_start:next_slide_start] = cleaned
 
         # Write back
         _atomic_write_text(output_path, "\n".join(lines))

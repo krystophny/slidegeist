@@ -16,6 +16,11 @@ from slidegeist.services import (
 logger = logging.getLogger(__name__)
 
 
+def compact_decorative_leaders(text: str) -> str:
+    """Replace OCR dot leaders with a compact semantic marker."""
+    return re.sub(r"(?:\.\s*){3,}", "[leader] ", text)
+
+
 def clean_text(text: str) -> str:
     """Remove control artifacts and normalize spacing."""
     text = re.sub(r"[^\S\n]+", " ", text)
@@ -49,7 +54,8 @@ def get_user_prompt(transcript: str, ocr_text: str) -> str:
         context_parts.append(f"Speaker transcript: {transcript[:2000]}")
 
     if ocr_text.strip():
-        context_parts.append(f"OCR text: {ocr_text[:4000]}")
+        compact_ocr = compact_decorative_leaders(ocr_text)
+        context_parts.append(f"OCR text: {compact_ocr[:4000]}")
 
     context = "\n".join(context_parts) if context_parts else "No context available"
 
@@ -67,6 +73,8 @@ If the frame type is NON-SLIDE, stop immediately after the word NON-SLIDE.
 If the frame type is SLIDE, continue with all five reconstruction sections:
 Use compact fragments, quote each visible item once, and do not repeat TEXT CONTENT in
 VISUAL ELEMENTS or LAYOUT. Aim for at most 200 words unless additional formulas require more.
+Represent each run of decorative dot leaders or repeated punctuation once as "[leader]";
+never transcribe the individual repeated characters.
 
 1. TITLE
 [Exact title text if available. Otherwise give a concise inferred title.]
@@ -118,7 +126,29 @@ class LlamaCppSlideDescriber(BaseSlideDescriber):
             max_tokens=self.max_new_tokens,
             temperature=self.temperature,
         )
-        return clean_text(response)
+        description = clean_text(response)
+
+        from slidegeist.frame_filter import is_complete_frame_description
+
+        if is_complete_frame_description(description):
+            return description
+
+        compact_attempt = compact_decorative_leaders(description)[:4000]
+        repair_prompt = (
+            f"{get_system_instruction()}\n\n"
+            "The multimodal attempt below was incomplete or repetitive. Rewrite it as one "
+            "complete frame classification. Use the reference context to recover missing "
+            "content, keep the result under 150 words, and include every required numbered "
+            "section for a SLIDE. Never emit dot leaders or repeated punctuation.\n\n"
+            f"{get_user_prompt(transcript, ocr_text)}\n\n"
+            f"Incomplete attempt:\n{compact_attempt}"
+        )
+        repaired = llama_cpp_complete(
+            repair_prompt,
+            max_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+        )
+        return clean_text(repaired)
 
 
 def build_ai_describer() -> BaseSlideDescriber:

@@ -176,6 +176,7 @@ def llama_cpp_complete(
     image_path: Path | None = None,
     max_tokens: int = 1024,
     temperature: float = 0.0,
+    repeat_penalty: float = 1.1,
     timeout: float = 180.0,
 ) -> str:
     """Run a chat completion against llama.cpp's OpenAI-compatible API.
@@ -199,6 +200,7 @@ def llama_cpp_complete(
         "messages": [{"role": "user", "content": content}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "repeat_penalty": repeat_penalty,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     model = get_llama_cpp_model_override() or get_llama_cpp_model()

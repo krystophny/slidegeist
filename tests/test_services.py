@@ -36,6 +36,7 @@ def test_llama_completion_sends_image_and_configured_model(
     assert captured["url"] == "http://vision.example:8080/v1/chat/completions"
     payload = captured["payload"]
     assert payload["model"] == "qwen27b"
+    assert payload["repeat_penalty"] == 1.1
     content = payload["messages"][0]["content"]
     assert content[0] == {"type": "text", "text": "Describe"}
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")

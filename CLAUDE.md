@@ -55,6 +55,9 @@ longest edge of the service copy (default 1024 pixels) while preserving the
 full-resolution extracted frame on disk.
 `SLIDEGEIST_LLAMACPP_MAX_TOKENS` sets the reconstruction response ceiling
 (default 1024, minimum 256).
+Multimodal completions use a mild repetition penalty (1.1). OCR dot leaders
+are compacted before inference; if an image response is still incomplete, one
+bounded text-only pass repairs it from the sanitized context and partial result.
 
 ### Recommended Whisper server: whisper.cpp
 

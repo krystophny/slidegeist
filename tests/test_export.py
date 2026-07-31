@@ -258,3 +258,34 @@ def test_split_description_checkpoint_is_parsed_and_replaced(
     assert "New title" in updated
     assert "Old title" not in updated
     assert updated.count("## AI Description (for reconstruction)") == 1
+
+
+def test_combined_checkpoint_repair_removes_duplicate_failed_descriptions(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "slides.md"
+    output.write_text(
+        '<a name="slide_001"></a>\n'
+        "## Slide 1\n\n"
+        "### OCR Text\n\nCONTENTS\n\n"
+        "---\n\n"
+        "### AI Description (for reconstruction)\n\nFirst truncated response\n\n"
+        "### AI Description (for reconstruction)\n\nSecond truncated response\n\n"
+        '<a name="slide_002"></a>\n'
+        "## Slide 2\n\n### OCR Text\n\nKeep this slide\n\n---\n",
+        encoding="utf-8",
+    )
+
+    _save_incremental_ai_description(
+        output,
+        "slide_001",
+        "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nRecovered",
+        _parse_existing_markdown(output),
+    )
+
+    updated = output.read_text(encoding="utf-8")
+    first_slide, second_slide = updated.split('<a name="slide_002"></a>')
+    assert first_slide.count("### AI Description (for reconstruction)") == 1
+    assert "Recovered" in first_slide
+    assert "truncated response" not in first_slide
+    assert "Keep this slide" in second_slide
