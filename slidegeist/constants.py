@@ -21,7 +21,7 @@ DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"
 # Remote transcription (Mistral Voxtral). Voxtral is the default provider;
 # the local Whisper server stays available through --local / --transcriber whisper.
 DEFAULT_MISTRAL_URL = "https://api.mistral.ai"
-DEFAULT_VOXTRAL_MODEL = "voxtral-mini-transcribe-2602"
+DEFAULT_VOXTRAL_MODEL = "voxtral-mini-latest"
 # Mistral accepts up to 3 h per request. 50 min keeps a wide margin and bounds
 # the cost of a retry, while still sending a typical lecture in one piece.
 DEFAULT_VOXTRAL_MAX_CHUNK_S = 3000

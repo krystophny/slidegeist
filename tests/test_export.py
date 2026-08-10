@@ -289,3 +289,35 @@ def test_combined_checkpoint_repair_removes_duplicate_failed_descriptions(
     assert "Recovered" in first_slide
     assert "truncated response" not in first_slide
     assert "Keep this slide" in second_slide
+
+
+def test_single_speaker_transcript_text_is_unprefixed() -> None:
+    """Single-speaker windows must render exactly as before speaker support."""
+    from slidegeist.export import _collect_transcript_text
+
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "Hello there", "words": [], "speaker": "SPEAKER_00"},
+        {"start": 1.0, "end": 2.0, "text": "and welcome", "words": [], "speaker": "SPEAKER_00"},
+    ]
+
+    assert _collect_transcript_text(segments, 0.0, 5.0) == "Hello there and welcome"
+
+
+def test_multi_speaker_slide_window_prefixes_speakers() -> None:
+    from slidegeist.export import _collect_transcript_text
+
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "What is the closure?", "words": [], "speaker": "SPEAKER_01"},
+        {"start": 1.0, "end": 2.0, "text": "Good question.", "words": [], "speaker": "SPEAKER_00"},
+        {"start": 2.0, "end": 3.0, "text": "It truncates the hierarchy.", "words": [], "speaker": "SPEAKER_00"},
+    ]
+
+    rendered = _collect_transcript_text(segments, 0.0, 5.0)
+
+    assert "**SPEAKER_01:** What is the closure?" in rendered
+    # Consecutive runs by the same speaker are merged, not repeated per segment.
+    assert "**SPEAKER_00:** Good question. It truncates the hierarchy." in rendered
+    # Must not emit anything that terminates a markdown transcript section.
+    for line in rendered.splitlines():
+        assert not line.startswith("#")
+        assert line.strip() != "---"

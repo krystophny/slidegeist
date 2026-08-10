@@ -334,8 +334,14 @@ def _collect_transcript_text(
     start_time: float,
     end_time: float,
 ) -> str:
-    """Collect transcript text overlapping the slide interval."""
-    texts: list[str] = []
+    """Collect transcript text overlapping the slide interval.
+
+    With zero or one speaker in the window the output is plain joined text,
+    exactly as before speaker labels existed. Only genuine multi-speaker
+    windows are broken into ``**SPEAKER_00:** ...`` runs, so single-lecturer
+    material - the overwhelming majority - stays byte-identical.
+    """
+    collected: list[tuple[str | None, str]] = []
     for segment in transcript_segments:
         seg_start = segment["start"]
         seg_end = segment["end"]
@@ -343,8 +349,39 @@ def _collect_transcript_text(
         if overlap:
             text = segment["text"].strip()
             if text:
-                texts.append(text)
-    return " ".join(texts)
+                collected.append((segment.get("speaker"), text))
+
+    if not collected:
+        return ""
+
+    speakers = {speaker for speaker, _ in collected if speaker}
+    if len(speakers) < 2:
+        return " ".join(text for _, text in collected)
+
+    lines: list[str] = []
+    current_speaker: str | None = None
+    current: list[str] = []
+    for speaker, text in collected:
+        if speaker != current_speaker and current:
+            lines.append(_format_speaker_run(current_speaker, current))
+            current = []
+        current_speaker = speaker
+        current.append(text)
+    if current:
+        lines.append(_format_speaker_run(current_speaker, current))
+    return "\n\n".join(lines)
+
+
+def _format_speaker_run(speaker: str | None, texts: list[str]) -> str:
+    """Render one speaker's consecutive text.
+
+    The renderer must never emit a bare ``---`` or a ``#``-prefixed line: both
+    terminate a transcript section in the markdown parsers.
+    """
+    body = " ".join(texts).replace("\n", " ").strip()
+    if not speaker:
+        return body
+    return f"**{speaker}:** {body}"
 
 
 def _collect_transcript_payload(

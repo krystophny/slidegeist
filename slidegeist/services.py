@@ -418,11 +418,17 @@ def voxtral_transcribe(
     if not endpoint.hostname:
         raise RuntimeError("Mistral URL is missing a hostname")
 
+    # Mistral accepts at most one granularity, and rejects the request outright
+    # when diarize is combined with anything but "segment":
+    #   "When diarize is set to True and streaming is disabled, the timestamp
+    #    granularity must be set to ['segment']"
+    # Word timing and speaker labels are therefore mutually exclusive here,
+    # unlike the Whisper API. Diarization wins; use --local when word-level
+    # timing matters.
     fields = [
         ("model", model),
         ("diarize", "true" if diarize else "false"),
-        ("timestamp_granularities[]", "segment"),
-        ("timestamp_granularities[]", "word"),
+        ("timestamp_granularities", "segment" if diarize else "word"),
     ]
     headers = {"Authorization": f"Bearer {api_key}"}
 

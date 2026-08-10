@@ -237,8 +237,10 @@ def _normalize_segments(
                 }
             )
 
+    language = payload.get("language")
     return {
-        "language": str(payload.get("language", "unknown")),
+        # Voxtral returns the key with a null value rather than omitting it.
+        "language": str(language) if language else "unknown",
         "segments": segments,
     }
 
