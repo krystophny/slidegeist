@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -12,10 +13,14 @@ from slidegeist.constants import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
+    DEFAULT_DIARIZE_MODE,
+    DEFAULT_TRANSCRIBER,
+    DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
 from slidegeist.ffmpeg import check_ffmpeg_available
+from slidegeist.services import get_mistral_api_key
 from slidegeist.pipeline import process_slides_only, process_video
 
 logger = logging.getLogger(__name__)
@@ -109,6 +114,28 @@ def handle_process(args: argparse.Namespace) -> None:
         check_prerequisites()
         validate_scene_threshold(args.scene_threshold)
 
+        # Fail before the download, not after 40 minutes of it. There is
+        # deliberately no fallback between providers: silently switching would
+        # either upload audio meant to stay local, or bill for a run expected
+        # to be free.
+        provider = getattr(args, "transcriber", DEFAULT_TRANSCRIBER)
+        if provider == "voxtral" and not get_mistral_api_key():
+            logger.error(
+                "MISTRAL_API_KEY is not set. Export it, or pass --local to "
+                "transcribe with the local Whisper server."
+            )
+            sys.exit(1)
+        if getattr(args, "diarize", DEFAULT_DIARIZE_MODE) == "local" and not os.getenv(
+            "SLIDEGEIST_DIARIZEN_PYTHON", ""
+        ).strip():
+            logger.error(
+                "--diarize local needs SLIDEGEIST_DIARIZEN_PYTHON pointing at a "
+                "Python interpreter with DiariZen installed, e.g.\n"
+                "  python3.11 -m venv ~/.venvs/diarizen311\n"
+                "  export SLIDEGEIST_DIARIZEN_PYTHON=~/.venvs/diarizen311/bin/python"
+            )
+            sys.exit(1)
+
         # Determine output directory early (before download)
         output_dir = args.out
         if output_dir == Path(DEFAULT_OUTPUT_DIR):
@@ -138,7 +165,9 @@ def handle_process(args: argparse.Namespace) -> None:
             image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
             split_slides=getattr(args, 'split', False),
             retry_failed=getattr(args, 'retry_failed', False),
-            force_redo_ai=getattr(args, 'force_redo_ai', False)
+            force_redo_ai=getattr(args, 'force_redo_ai', False),
+            provider=provider,
+            diarize=getattr(args, 'diarize', DEFAULT_DIARIZE_MODE),
         )
 
         print("\n" + "=" * 60)
@@ -300,9 +329,37 @@ Examples:
     )
     process_parser.add_argument(
         "--model",
-        default=DEFAULT_WHISPER_MODEL,
-        choices=["tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "large-v3-turbo"],
-        help=f"Whisper model size (default: {DEFAULT_WHISPER_MODEL})"
+        default=None,
+        help=(
+            "Transcription model id. Whisper sizes (tiny, base, small, medium, "
+            f"large-v3-turbo; default {DEFAULT_WHISPER_MODEL}) or a Voxtral id "
+            f"(default {DEFAULT_VOXTRAL_MODEL}). Not an enumeration: "
+            "SLIDEGEIST_WHISPER_URL also supports LocalAI and faster-whisper-server, "
+            "whose model ids are not Whisper size names."
+        ),
+    )
+    process_parser.add_argument(
+        "--transcriber",
+        default=os.getenv("SLIDEGEIST_TRANSCRIBER", DEFAULT_TRANSCRIBER),
+        choices=["voxtral", "whisper"],
+        help=f"Transcription backend (default: {DEFAULT_TRANSCRIBER})",
+    )
+    process_parser.add_argument(
+        "--local",
+        dest="transcriber",
+        action="store_const",
+        const="whisper",
+        help="Shorthand for --transcriber whisper: keep audio on this machine",
+    )
+    process_parser.add_argument(
+        "--diarize",
+        default=DEFAULT_DIARIZE_MODE,
+        choices=["auto", "local", "provider", "off"],
+        help=(
+            "Speaker diarization: auto uses the provider's own labels or local "
+            "DiariZen when configured, local forces DiariZen, provider trusts the "
+            f"transcriber, off disables it (default: {DEFAULT_DIARIZE_MODE})"
+        ),
     )
     process_parser.add_argument(
         "--split",

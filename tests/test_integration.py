@@ -129,6 +129,7 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
             "slides_md": slides_md,
         }
 
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
     monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
     monkeypatch.setattr("slidegeist.cli.resolve_video_path", lambda input_str, output_dir, cookies_from_browser=None: Path(input_str))
@@ -138,3 +139,55 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     captured = capsys.readouterr()
     assert "Processing complete" in captured.out
+
+
+def test_cli_defaults_to_voxtral_and_requires_a_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a key the default provider must stop before doing any work."""
+    calls: list[dict[str, Any]] = []
+
+    def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"output_dir": tmp_path, "slides": [], "slides_md": tmp_path / "slides.md"}
+
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    monkeypatch.delenv("SLIDEGEIST_MISTRAL_API_KEY", raising=False)
+    monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
+    monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
+    monkeypatch.setattr(
+        "slidegeist.cli.resolve_video_path",
+        lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
+    )
+    monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+    assert not calls, "must fail before any download or processing"
+
+
+def test_cli_local_flag_selects_whisper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--local must not require a Mistral key and must not silently fall back."""
+    calls: list[dict[str, Any]] = []
+
+    def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"output_dir": tmp_path, "slides": [], "slides_md": tmp_path / "slides.md"}
+
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
+    monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
+    monkeypatch.setattr(
+        "slidegeist.cli.resolve_video_path",
+        lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["slidegeist", "process", str(tmp_path / "input.mp4"), "--local"]
+    )
+
+    cli.main()
+
+    assert calls and calls[0]["provider"] == "whisper"
