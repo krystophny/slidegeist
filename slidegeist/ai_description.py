@@ -6,11 +6,14 @@ import logging
 import re
 from pathlib import Path
 
+from slidegeist.constants import DEFAULT_DESCRIBER
 from slidegeist.services import (
     get_llama_cpp_max_tokens,
     get_llama_cpp_model,
     get_llama_cpp_model_override,
+    get_openrouter_model,
     llama_cpp_complete,
+    openrouter_describe,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,24 +136,87 @@ class LlamaCppSlideDescriber(BaseSlideDescriber):
         if is_complete_frame_description(description):
             return description
 
-        compact_attempt = compact_decorative_leaders(description)[:4000]
-        repair_prompt = (
-            f"{get_system_instruction()}\n\n"
-            "The multimodal attempt below was incomplete or repetitive. Rewrite it as one "
-            "complete frame classification. Use the reference context to recover missing "
-            "content, keep the result under 150 words, and include every required numbered "
-            "section for a SLIDE. Never emit dot leaders or repeated punctuation.\n\n"
-            f"{get_user_prompt(transcript, ocr_text)}\n\n"
-            f"Incomplete attempt:\n{compact_attempt}"
-        )
         repaired = llama_cpp_complete(
-            repair_prompt,
+            _repair_prompt(description, transcript, ocr_text),
+            image_path=image_path,
             max_tokens=self.max_new_tokens,
             temperature=self.temperature,
         )
         return clean_text(repaired)
 
 
-def build_ai_describer() -> BaseSlideDescriber:
-    """Build the remote llama.cpp slide describer."""
-    return LlamaCppSlideDescriber()
+class OpenRouterSlideDescriber(BaseSlideDescriber):
+    """Multimodal slide describer backed by OpenRouter (Gemma 4 by default)."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        max_new_tokens: int | None = None,
+        temperature: float = 0.0,
+    ) -> None:
+        self.model = model or get_openrouter_model()
+        self.name = f"{self.model} (OpenRouter)"
+        self.max_new_tokens = (
+            get_llama_cpp_max_tokens() if max_new_tokens is None else max_new_tokens
+        )
+        self.temperature = temperature
+
+    def describe(self, image_path: Path, transcript: str, ocr_text: str = "") -> str:
+        prompt = f"{get_system_instruction()}\n\n{get_user_prompt(transcript, ocr_text)}"
+        description = clean_text(
+            openrouter_describe(
+                prompt,
+                image_path=image_path,
+                model=self.model,
+                max_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+            )
+        )
+
+        from slidegeist.frame_filter import is_complete_frame_description
+
+        if is_complete_frame_description(description):
+            return description
+
+        repaired = openrouter_describe(
+            _repair_prompt(description, transcript, ocr_text),
+            image_path=image_path,
+            model=self.model,
+            max_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+        )
+        return clean_text(repaired)
+
+
+def _repair_prompt(description: str, transcript: str, ocr_text: str) -> str:
+    """Build the retry prompt for an incomplete first attempt.
+
+    The retry is always re-sent *with the image*. An earlier version omitted it
+    and asked the model to reconstruct the page from transcript and OCR alone,
+    which invites invented formulas on exactly the handwritten pages where the
+    first attempt struggled.
+    """
+    compact_attempt = compact_decorative_leaders(description)[:4000]
+    return (
+        f"{get_system_instruction()}\n\n"
+        "The previous attempt below was incomplete or repetitive. Look at the image again "
+        "and rewrite it as one complete frame classification. Transcribe only what is "
+        "visible; never invent content that the image does not show. Keep the result under "
+        "150 words and include every required numbered section for a SLIDE. Never emit dot "
+        "leaders or repeated punctuation.\n\n"
+        f"{get_user_prompt(transcript, ocr_text)}\n\n"
+        f"Incomplete attempt:\n{compact_attempt}"
+    )
+
+
+def build_ai_describer(provider: str = DEFAULT_DESCRIBER) -> BaseSlideDescriber:
+    """Build a slide describer for the requested provider.
+
+    OpenRouter (Gemma 4) is the default; ``local`` uses the llama.cpp server.
+    There is no automatic fallback between them.
+    """
+    if provider in ("openrouter", "gemma", "remote"):
+        return OpenRouterSlideDescriber()
+    if provider in ("local", "llamacpp", "llama.cpp"):
+        return LlamaCppSlideDescriber()
+    raise ValueError(f"Unknown description provider: {provider!r}")

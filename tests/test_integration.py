@@ -60,6 +60,9 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
     class FakeDescriber:
         name = "independent fixture"
 
+        def __init__(self, *_: Any, **__: Any) -> None:
+            pass
+
         def describe(self, *_: Any, **__: Any) -> str:
             return (
                 "0. FRAME TYPE\nSLIDE\n\n"
@@ -130,6 +133,7 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
         }
 
     monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
     monkeypatch.setattr("slidegeist.cli.resolve_video_path", lambda input_str, output_dir, cookies_from_browser=None: Path(input_str))
@@ -191,3 +195,56 @@ def test_cli_local_flag_selects_whisper(
     cli.main()
 
     assert calls and calls[0]["provider"] == "whisper"
+    assert calls[0]["describer_provider"] == "local", (
+        "--local must keep slide descriptions on this machine too"
+    )
+
+
+def test_default_run_uses_openrouter_describer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without --local, slide description defaults to OpenRouter (Gemma 4)."""
+    calls: list[dict[str, Any]] = []
+
+    def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"output_dir": tmp_path, "slides": [], "slides_md": tmp_path / "slides.md"}
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
+    monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
+    monkeypatch.setattr(
+        "slidegeist.cli.resolve_video_path",
+        lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
+    )
+    monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
+
+    cli.main()
+
+    assert calls[0]["describer_provider"] == "openrouter"
+    assert calls[0]["provider"] == "voxtral"
+
+
+def test_missing_openrouter_key_stops_before_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing describer key is an error naming --local, never a silent fallback."""
+    calls: list[dict[str, Any]] = []
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("SLIDEGEIST_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "slidegeist.cli.process_video", lambda *a, **k: calls.append(k) or {}
+    )
+    monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
+    monkeypatch.setattr(
+        "slidegeist.cli.resolve_video_path",
+        lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
+    )
+    monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
+
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert not calls

@@ -22,6 +22,8 @@ from PIL import Image, ImageOps
 from slidegeist.constants import (
     DEFAULT_LLAMACPP_URL,
     DEFAULT_MISTRAL_URL,
+    DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_OPENROUTER_URL,
     DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_URL,
 )
@@ -60,6 +62,109 @@ def get_mistral_api_key() -> str | None:
 def get_voxtral_model() -> str:
     """Return the configured Voxtral model id."""
     return os.getenv("SLIDEGEIST_VOXTRAL_MODEL", DEFAULT_VOXTRAL_MODEL).strip()
+
+
+def get_openrouter_url() -> str:
+    """Return the configured OpenRouter base URL."""
+    return os.getenv("SLIDEGEIST_OPENROUTER_URL", DEFAULT_OPENROUTER_URL).rstrip("/")
+
+
+def get_openrouter_api_key() -> str | None:
+    """Return the OpenRouter API key, or None when unset."""
+    for name in ("SLIDEGEIST_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def get_openrouter_model() -> str:
+    """Return the configured OpenRouter vision model id."""
+    return os.getenv("SLIDEGEIST_OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL).strip()
+
+
+def openrouter_describe(
+    prompt: str,
+    *,
+    image_path: Path,
+    model: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.0,
+    timeout: float = 180.0,
+    attempts: int = 3,
+) -> str:
+    """Run a vision chat completion against OpenRouter."""
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not set; export it or use --local to describe "
+            "slides with the local llama.cpp server"
+        )
+
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": _image_data_url(image_path)}},
+                ],
+            }
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter attributes traffic with these; harmless elsewhere.
+        "HTTP-Referer": "https://github.com/itpplasma/slidegeist",
+        "X-Title": "slidegeist",
+    }
+
+    endpoint = f"{get_openrouter_url()}/v1/chat/completions"
+    delay = 2.0
+    last_error = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            response = _http_json(
+                endpoint,
+                method="POST",
+                payload=payload,
+                extra_headers=headers,
+                timeout=timeout,
+            )
+        except error.HTTPError as exc:  # noqa: PERF203 - retry needs the exception
+            body = exc.read().decode("utf-8", "replace")[:400]
+            last_error = f"openrouter HTTP {exc.code}: {body}"
+            if exc.code != 429 and exc.code < 500:
+                raise RuntimeError(last_error) from exc
+        except (TimeoutError, OSError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+        else:
+            choices = response.get("choices") or []
+            if not choices:
+                raise RuntimeError(f"openrouter returned no choices: {response}")
+            message = choices[0].get("message") or {}
+            text = message.get("content") or ""
+            if not isinstance(text, str):
+                raise RuntimeError("openrouter completion content was not a string")
+            return _strip_reasoning(text)
+
+        if attempt == attempts:
+            break
+        logger.warning(
+            "OpenRouter attempt %d/%d failed (%s); retrying in %.0fs",
+            attempt,
+            attempts,
+            last_error,
+            delay,
+        )
+        time.sleep(delay)
+        delay *= 4
+
+    raise RuntimeError(f"openrouter failed after {attempts} attempts: {last_error}")
 
 
 def get_llama_cpp_model_override() -> str | None:
@@ -116,6 +221,7 @@ def _http_json(
     *,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
     """Send a JSON HTTP request and decode the JSON response."""
@@ -124,6 +230,8 @@ def _http_json(
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if extra_headers:
+        headers.update(extra_headers)
 
     http_request = request.Request(url, data=data, headers=headers, method=method)
     with request.urlopen(http_request, timeout=timeout) as response:

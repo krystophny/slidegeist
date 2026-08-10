@@ -13,14 +13,16 @@ from slidegeist.constants import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
+    DEFAULT_DESCRIBER,
     DEFAULT_DIARIZE_MODE,
+    DEFAULT_OPENROUTER_MODEL,
     DEFAULT_TRANSCRIBER,
     DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
 from slidegeist.ffmpeg import check_ffmpeg_available
-from slidegeist.services import get_mistral_api_key
+from slidegeist.services import get_mistral_api_key, get_openrouter_api_key
 from slidegeist.pipeline import process_slides_only, process_video
 
 logger = logging.getLogger(__name__)
@@ -118,7 +120,18 @@ def handle_process(args: argparse.Namespace) -> None:
         # deliberately no fallback between providers: silently switching would
         # either upload audio meant to stay local, or bill for a run expected
         # to be free.
-        provider = getattr(args, "transcriber", DEFAULT_TRANSCRIBER)
+        # --local is the single switch for "nothing leaves this machine".
+        local_only = getattr(args, "local", False)
+        provider = "whisper" if local_only else getattr(args, "transcriber", DEFAULT_TRANSCRIBER)
+        describer_provider = (
+            "local" if local_only else getattr(args, "describer", DEFAULT_DESCRIBER)
+        )
+        if describer_provider == "openrouter" and not get_openrouter_api_key():
+            logger.error(
+                "OPENROUTER_API_KEY is not set. Export it, or pass --local to "
+                "describe slides with the local llama.cpp server."
+            )
+            sys.exit(1)
         if provider == "voxtral" and not get_mistral_api_key():
             logger.error(
                 "MISTRAL_API_KEY is not set. Export it, or pass --local to "
@@ -168,6 +181,7 @@ def handle_process(args: argparse.Namespace) -> None:
             force_redo_ai=getattr(args, 'force_redo_ai', False),
             provider=provider,
             diarize=getattr(args, 'diarize', DEFAULT_DIARIZE_MODE),
+            describer_provider=describer_provider,
         )
 
         print("\n" + "=" * 60)
@@ -345,11 +359,21 @@ Examples:
         help=f"Transcription backend (default: {DEFAULT_TRANSCRIBER})",
     )
     process_parser.add_argument(
+        "--describer",
+        default=os.getenv("SLIDEGEIST_DESCRIBER", DEFAULT_DESCRIBER),
+        choices=["openrouter", "local"],
+        help=(
+            f"Slide description backend (default: {DEFAULT_DESCRIBER}, "
+            f"{DEFAULT_OPENROUTER_MODEL})"
+        ),
+    )
+    process_parser.add_argument(
         "--local",
-        dest="transcriber",
-        action="store_const",
-        const="whisper",
-        help="Shorthand for --transcriber whisper: keep audio on this machine",
+        action="store_true",
+        help=(
+            "Keep everything on this machine: local Whisper for audio and the "
+            "local llama.cpp server for slide descriptions"
+        ),
     )
     process_parser.add_argument(
         "--diarize",

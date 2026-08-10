@@ -61,10 +61,17 @@ def test_description_token_budget_rejects_too_small_values(
         LlamaCppSlideDescriber()
 
 
-def test_incomplete_visual_description_gets_one_text_only_repair(
+def test_incomplete_visual_description_is_repaired_with_the_image(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The retry must re-send the image, not reconstruct from context.
+
+    An earlier version omitted the image on repair and asked the model to
+    rebuild the page from transcript and OCR alone. On handwritten formula
+    pages - exactly the ones whose first attempt fails - that invites invented
+    mathematics, which is worse than an incomplete description.
+    """
     image = tmp_path / "contents.jpg"
     image.write_bytes(b"image")
     calls: list[Path | None] = []
@@ -74,10 +81,11 @@ def test_incomplete_visual_description_gets_one_text_only_repair(
         "4. VISUAL ELEMENTS\nNone\n\n5. LAYOUT\nOne-column list"
     )
 
-    def fake_complete(_: str, *, image_path: Path | None = None, **__: object) -> str:
+    def fake_complete(prompt: str, *, image_path: Path | None = None, **__: object) -> str:
         calls.append(image_path)
-        if image_path is not None:
+        if len(calls) == 1:
             return "0. FRAME TYPE\nSLIDE\n\n1. TITLE\nContents\n\n2. TEXT CONTENT\n. . ."
+        assert "look at the image again" in prompt.lower()
         return complete
 
     monkeypatch.setattr("slidegeist.ai_description.llama_cpp_complete", fake_complete)
@@ -87,4 +95,4 @@ def test_incomplete_visual_description_gets_one_text_only_repair(
     )
 
     assert result == complete
-    assert calls == [image, None]
+    assert calls == [image, image], "the repair attempt must also see the image"

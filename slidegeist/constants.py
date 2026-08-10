@@ -27,6 +27,19 @@ DEFAULT_VOXTRAL_MODEL = "voxtral-mini-latest"
 DEFAULT_VOXTRAL_MAX_CHUNK_S = 3000
 DEFAULT_TRANSCRIBER = "voxtral"
 
+# Slide description. Gemma 4 via OpenRouter is the default; the same model
+# family runs locally through llama.cpp with --local.
+#
+# Chosen on measurements over real lecture pages: Gemma 4 encodes a 1024px
+# slide in ~320 tokens where Qwen 3.6 needs ~5,770, and it reads handwritten
+# physics notation correctly (r_90) where cheaper tiers misread it (Gamma_90).
+# In an 8-slide A/B judged against the source images, 26B-A4B beat the dense
+# 31B 6-2, at roughly half the latency.
+DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api"
+DEFAULT_DESCRIBER = "openrouter"
+DEFAULT_OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it"
+DEFAULT_LOCAL_DESCRIBE_MODEL = "gemma-4-26b-a4b"
+
 # Speaker diarization. DiariZen runs in a separate interpreter: its weights are
 # CC BY-NC 4.0 and torch has no wheels for the 3.14 host interpreter.
 DEFAULT_DIARIZEN_MODEL = "BUT-FIT/diarizen-wavlm-large-s80-md"

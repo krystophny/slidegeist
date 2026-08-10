@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from slidegeist.constants import (
+    DEFAULT_DESCRIBER,
     DEFAULT_DIARIZE_MODE,
     DEFAULT_IMAGE_FORMAT,
     DEFAULT_MIN_SCENE_LEN,
@@ -452,6 +453,7 @@ def process_video(
     provider: str = DEFAULT_TRANSCRIBER,
     transcriber: object | None = None,
     diarize: str = DEFAULT_DIARIZE_MODE,
+    describer_provider: str = DEFAULT_DESCRIBER,
 ) -> dict[str, Path | list[Path]]:
     """Process a video and return generated artifacts.
 
@@ -742,7 +744,7 @@ def process_video(
             from slidegeist.export import run_ai_descriptions
             from slidegeist.frame_filter import filter_non_slide_states
 
-            describer = build_ai_describer()
+            describer = build_ai_describer(describer_provider)
             logger.info(f"Using {describer.name} for AI descriptions")
             markdown_path = output_dir / ("index.md" if split_slides else "slides.md")
 

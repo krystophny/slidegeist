@@ -307,6 +307,45 @@ Voxtral **cannot return word timing and speaker labels together**: setting
 timing matters, use `--local`, which gets word timing from whisper.cpp and
 speaker turns from DiariZen independently.
 
+## Slide description providers
+
+Slide descriptions default to **Gemma 4 via OpenRouter**. `--local` switches the
+whole run — audio *and* vision — to this machine.
+
+```bash
+slidegeist lecture.mp4                       # Voxtral audio + Gemma 4 descriptions
+slidegeist lecture.mp4 --local               # local Whisper + local llama.cpp
+slidegeist lecture.mp4 --describer local     # cloud audio, local descriptions
+```
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENROUTER_API_KEY` | – | Describer auth (vendor-standard name) |
+| `SLIDEGEIST_OPENROUTER_API_KEY` | – | Override, checked first |
+| `SLIDEGEIST_OPENROUTER_URL` | `https://openrouter.ai/api` | Gateway override |
+| `SLIDEGEIST_OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | Vision model id |
+| `SLIDEGEIST_DESCRIBER` | `openrouter` | Default backend |
+
+As with transcription, there is **no automatic fallback**: a missing key is an
+error naming `--local`.
+
+### Why Gemma 4
+
+Measured on real handwritten lecture pages rather than chosen from a price table:
+
+- It encodes a 1024 px slide in **~320 tokens**; Qwen 3.6 needs **~5,770** for the
+  same image, and its reasoning modes consumed 2,500 output tokens without
+  producing a transcription at all.
+- It reads handwritten physics notation correctly. Cheaper tiers (Ministral 3B,
+  Mistral Small, Qwen3-VL-8B, Gemini 2.5 Flash-Lite, GPT-5-mini) misread `r₉₀`
+  as `Γ₉₀` — a silent, physics-substantive error.
+- In an 8-slide A/B judged against the source images, `gemma-4-26b-a4b`
+  beat the dense `gemma-4-31b` 6-2, at roughly half the latency. Most wins were
+  for *not inventing* content that was absent from the page.
+
+The same model runs locally, so `--local` is a genuine equivalent rather than a
+downgrade.
+
 ### Speaker diarization
 
 Local diarization uses [DiariZen](https://github.com/BUTSpeechFIT/DiariZen) in a
