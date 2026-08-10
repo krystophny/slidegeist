@@ -20,6 +20,7 @@ from urllib import error, parse, request
 from PIL import Image, ImageOps
 
 from slidegeist.constants import (
+    DEFAULT_LLAMACPP_ATTEMPTS,
     DEFAULT_LLAMACPP_URL,
     DEFAULT_MISTRAL_URL,
     DEFAULT_OPENROUTER_MODEL,
@@ -62,6 +63,24 @@ def get_mistral_api_key() -> str | None:
 def get_voxtral_model() -> str:
     """Return the configured Voxtral model id."""
     return os.getenv("SLIDEGEIST_VOXTRAL_MODEL", DEFAULT_VOXTRAL_MODEL).strip()
+
+
+def get_llama_cpp_attempts() -> int:
+    """Return how many times a llama.cpp request is retried before giving up."""
+    raw = os.getenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", str(DEFAULT_LLAMACPP_ATTEMPTS))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("SLIDEGEIST_LLAMACPP_ATTEMPTS must be an integer") from exc
+    if value < 1:
+        raise ValueError("SLIDEGEIST_LLAMACPP_ATTEMPTS must be at least 1")
+    return value
+
+
+def get_llama_cpp_fallback_model() -> str | None:
+    """Return a non-speculative model alias to fall back to, if configured."""
+    value = os.getenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", "").strip()
+    return value or None
 
 
 def get_openrouter_url() -> str:
@@ -344,12 +363,49 @@ def llama_cpp_complete(
     if model:
         payload["model"] = model
 
-    response = _http_json(
-        f"{get_llama_cpp_url()}/v1/chat/completions",
-        method="POST",
-        payload=payload,
-        timeout=timeout,
-    )
+    # Safety net for speculative-decoding (MTP) builds. MTP is the speedup worth
+    # having, but it can abort mid-request on dense image prompts. Rather than
+    # giving up the speed, retry the request, and only if it keeps failing fall
+    # back to a configured non-speculative alias for that one frame.
+    endpoint = f"{get_llama_cpp_url()}/v1/chat/completions"
+    attempts = get_llama_cpp_attempts()
+    fallback = get_llama_cpp_fallback_model()
+    delay = 2.0
+    last_error = ""
+    response = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = _http_json(endpoint, method="POST", payload=payload, timeout=timeout)
+            break
+        except (TimeoutError, OSError, error.HTTPError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt == attempts:
+                if fallback and payload.get("model") != fallback:
+                    logger.warning(
+                        "llama.cpp failed %d times (%s); retrying once on fallback model %s",
+                        attempts,
+                        last_error,
+                        fallback,
+                    )
+                    payload["model"] = fallback
+                    response = _http_json(
+                        endpoint, method="POST", payload=payload, timeout=timeout
+                    )
+                    break
+                raise RuntimeError(
+                    f"llama.cpp failed after {attempts} attempts: {last_error}"
+                ) from exc
+            logger.warning(
+                "llama.cpp attempt %d/%d failed (%s); retrying in %.0fs",
+                attempt,
+                attempts,
+                last_error,
+                delay,
+            )
+            time.sleep(delay)
+            delay *= 2
+
+    assert response is not None
     choices = response.get("choices", [])
     if not isinstance(choices, list) or not choices:
         raise RuntimeError("llama.cpp returned no completion choices")

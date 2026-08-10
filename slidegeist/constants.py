@@ -16,6 +16,10 @@ DEFAULT_MAX_CYCLES = 3       # Maximum optimization iterations (Opencast default
 # Whisper transcription
 DEFAULT_WHISPER_MODEL = "large-v3-turbo"
 DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"
+# Speculative-decoding (MTP) builds are worth their speed but can abort on
+# dense image prompts; retry rather than avoid, and optionally fall back to a
+# non-speculative alias via SLIDEGEIST_LLAMACPP_FALLBACK_MODEL.
+DEFAULT_LLAMACPP_ATTEMPTS = 3
 DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"
 
 # Remote transcription (Mistral Voxtral). Voxtral is the default provider;

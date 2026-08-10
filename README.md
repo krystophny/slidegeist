@@ -331,6 +331,9 @@ behind a separate classification pass.
 | `SLIDEGEIST_OPENROUTER_URL` | `https://openrouter.ai/api` | Gateway override |
 | `SLIDEGEIST_OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | Vision model id |
 | `SLIDEGEIST_DESCRIBER` | `local` | Default backend |
+| `SLIDEGEIST_LLAMACPP_ATTEMPTS` | `3` | Retries before giving up on the local server |
+| `SLIDEGEIST_LLAMACPP_FALLBACK_MODEL` | – | Non-speculative alias to fall back to |
+| `SLIDEGEIST_OPENCAST_SESSION` | `~/.config/helpy/tube_session.json` | Cached Opencast session for authenticated downloads |
 
 As with transcription, there is **no automatic fallback**: a missing key is an
 error telling you to drop `--cloud`.
@@ -376,6 +379,30 @@ export SLIDEGEIST_DIARIZEN_PYTHON=~/.venvs/diarizen311/bin/python
 
 Diarization answers *when each voice speaks*, not *who they are*: labels are
 `SPEAKER_00`, `SPEAKER_01`, … and are local to one recording.
+
+## Downloading from Opencast / TU Graz TUbe
+
+`slidegeist https://tube.tugraz.at/play/<uuid>` downloads directly, before
+yt-dlp is consulted, because Opencast's two APIs disagree: the external API
+(`/api/events/<id>/publications`) reports an empty media list for a number of
+older events while the search API (`/search/episode.json?id=<id>`) still lists
+concrete MP4 tracks for exactly those events. Slidegeist tries the external API
+first, falls back to the search API, and only then to HLS.
+
+Downloads are **stream copies at network speed** — ffmpeg is invoked without
+`-re`, so nothing is paced to real time; an HLS source is pulled
+segment-by-segment as fast as the server serves it.
+
+Authenticated instances are supported by reusing a cached session
+(`SLIDEGEIST_OPENCAST_SESSION`); no login is re-implemented.
+
+### Speculative decoding (MTP) safety net
+
+MTP builds are faster and worth using, but can abort mid-request on dense image
+prompts. Rather than avoiding them, slidegeist retries
+(`SLIDEGEIST_LLAMACPP_ATTEMPTS`, default 3) and, if a frame still fails, drops
+to `SLIDEGEIST_LLAMACPP_FALLBACK_MODEL` for that frame alone. Combined with the
+per-slide incremental save, a wobble costs one retry rather than the run.
 
 ## Limitations
 

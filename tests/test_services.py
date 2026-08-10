@@ -196,3 +196,45 @@ def test_unusable_word_timing_is_dropped_per_segment() -> None:
 
     assert result["segments"][0]["words"], "healthy segment keeps its words"
     assert not result["segments"][1]["words"], "only the broken segment loses timing"
+
+
+def test_llamacpp_retries_then_uses_fallback_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MTP builds are worth their speed; a wobble must not lose the frame.
+
+    Speculative decoding can abort on dense image prompts, so the request is
+    retried, and only if it keeps failing does it drop to a configured
+    non-speculative alias for that one frame.
+    """
+    from slidegeist import services
+
+    calls: list[str] = []
+
+    def flaky(url, *, method="GET", payload=None, extra_headers=None, timeout=5.0):
+        calls.append(payload.get("model", "-"))
+        if payload.get("model") != "qwen27b-nomtp":
+            raise OSError("connection reset by peer")
+        return {"choices": [{"message": {"content": "recovered"}}]}
+
+    monkeypatch.setattr(services, "_http_json", flaky)
+    monkeypatch.setattr(services.time, "sleep", lambda _: None)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen27b-mtp")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "2")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", "qwen27b-nomtp")
+
+    assert services.llama_cpp_complete("prompt") == "recovered"
+    assert calls == ["qwen27b-mtp", "qwen27b-mtp", "qwen27b-nomtp"], calls
+
+
+def test_llamacpp_raises_when_no_fallback_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from slidegeist import services
+
+    def always_fails(url, **kwargs):
+        raise OSError("connection reset by peer")
+
+    monkeypatch.setattr(services, "_http_json", always_fails)
+    monkeypatch.setattr(services.time, "sleep", lambda _: None)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "2")
+    monkeypatch.delenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="failed after 2 attempts"):
+        services.llama_cpp_complete("prompt")
