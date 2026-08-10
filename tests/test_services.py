@@ -115,8 +115,8 @@ def test_transcript_chunk_offsets_follow_pcm_sample_counts(tmp_path: Path) -> No
     assert _chunk_start_offsets(chunks) == [0.0, 1.25]
 
 
-def test_incompatible_whisper_vad_word_clock_is_not_published() -> None:
-    """Words on a silence-compressed clock must not masquerade as slide timing."""
+def test_incompatible_whisper_vad_word_clock_is_rebased() -> None:
+    """Words on the VAD-compressed clock are mapped back onto the segment clock."""
     payload = {
         "language": "en",
         "segments": [
@@ -147,4 +147,52 @@ def test_incompatible_whisper_vad_word_clock_is_not_published() -> None:
         (14.66, 18.02),
         (18.02, 23.47),
     ]
-    assert all(not segment["words"] for segment in result["segments"])
+
+    # Word timing survives, rebased onto each segment's own span instead of
+    # being discarded wholesale: word-level speaker assignment depends on it.
+    for segment in result["segments"]:
+        assert segment["words"], "word timing must be preserved, not dropped"
+        previous_end = segment["start"] - 1e-9
+        for word in segment["words"]:
+            assert segment["start"] - 1e-9 <= word["start"] <= segment["end"] + 1e-9
+            assert segment["start"] - 1e-9 <= word["end"] <= segment["end"] + 1e-9
+            assert word["start"] >= previous_end - 1e-9
+            assert word["end"] >= word["start"]
+            previous_end = word["end"]
+
+    # The first and last word of a segment anchor to the segment boundaries.
+    first = result["segments"][0]
+    assert first["words"][0]["start"] == pytest.approx(14.66)
+    assert first["words"][-1]["end"] == pytest.approx(18.02)
+
+
+def test_unusable_word_timing_is_dropped_per_segment() -> None:
+    """Non-monotonic words lose timing for their own segment only."""
+    payload = {
+        "language": "en",
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "good segment",
+                "words": [
+                    {"word": "good", "start": 0.0, "end": 1.0},
+                    {"word": "segment", "start": 1.0, "end": 2.0},
+                ],
+            },
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "bad segment",
+                "words": [
+                    {"word": "bad", "start": 3.5, "end": 3.9},
+                    {"word": "segment", "start": 2.1, "end": 2.4},
+                ],
+            },
+        ],
+    }
+
+    result = _normalize_transcript(payload)
+
+    assert result["segments"][0]["words"], "healthy segment keeps its words"
+    assert not result["segments"][1]["words"], "only the broken segment loses timing"
