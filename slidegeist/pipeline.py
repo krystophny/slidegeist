@@ -7,13 +7,17 @@ import re
 from pathlib import Path
 
 from slidegeist.constants import (
+    DEFAULT_DIARIZE_MODE,
     DEFAULT_IMAGE_FORMAT,
     DEFAULT_MIN_SCENE_LEN,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
+    DEFAULT_TRANSCRIBER,
     DEFAULT_WHISPER_MODEL,
 )
+
+TRANSCRIPT_SCHEMA = "slidegeist-transcript-v2"
 from slidegeist.export import export_slides_json
 from slidegeist.ffmpeg import FFmpegError, detect_scenes, get_video_duration
 from slidegeist.ocr import OcrPipeline
@@ -47,14 +51,22 @@ def load_transcript_checkpoint(path: Path) -> list[Segment]:
                     continue
                 word = str(raw_word.get("word", "")).strip()
                 if word:
-                    words.append(
-                        {
-                            "word": word,
-                            "start": float(raw_word.get("start", start)),
-                            "end": float(raw_word.get("end", end)),
-                        }
-                    )
-        segments.append({"start": start, "end": end, "text": text, "words": words})
+                    entry: Word = {
+                        "word": word,
+                        "start": float(raw_word.get("start", start)),
+                        "end": float(raw_word.get("end", end)),
+                    }
+                    # Only set the key when present, so schema v1 checkpoints
+                    # round-trip to exactly the dicts they did before.
+                    if raw_word.get("speaker"):
+                        entry["speaker"] = str(raw_word["speaker"])
+                    words.append(entry)
+        segment: Segment = {"start": start, "end": end, "text": text, "words": words}
+        if raw.get("speaker"):
+            segment["speaker"] = str(raw["speaker"])
+        if isinstance(raw.get("speakers"), list):
+            segment["speakers"] = raw["speakers"]
+        segments.append(segment)
     return segments
 
 
@@ -332,8 +344,10 @@ def detect_completed_stages(output_dir: Path) -> dict[str, bool]:
                         # Stop at next section or separator
                         if next_line.startswith("#") or next_line == "---":
                             break
-                        # Found actual content
-                        if next_line and not next_line.startswith("**"):
+                        # Found actual content. Speaker-prefixed lines look like
+                        # "**SPEAKER_00:** ..." and are real content, so only
+                        # headings and separators end the section.
+                        if next_line:
                             found_transcript_content = True
                             break
                     if found_transcript_content:
@@ -435,6 +449,9 @@ def process_video(
     ocr_pipeline: OcrPipeline | None = None,
     retry_failed: bool = False,
     force_redo_ai: bool = False,
+    provider: str = DEFAULT_TRANSCRIBER,
+    transcriber: object | None = None,
+    diarize: str = DEFAULT_DIARIZE_MODE,
 ) -> dict[str, Path | list[Path]]:
     """Process a video and return generated artifacts.
 
@@ -573,15 +590,58 @@ def process_video(
         logger.info("STEP 3: Audio Transcription")
         logger.info("=" * 60)
 
+        from slidegeist.diarize import build_diarizer
+        from slidegeist.transcribers import build_transcriber
+
+        active_transcriber = transcriber or build_transcriber(provider, model)
+        logger.info("Using %s for transcription", active_transcriber.name)
+
+        diarizer = None
+        if diarize != "off":
+            if active_transcriber.provides_speakers and diarize == "auto":
+                logger.info("Using provider-native speaker labels")
+            else:
+                diarizer = build_diarizer(diarize)
+                if diarizer is not None:
+                    logger.info("Using %s for diarization", diarizer.name)
+
         try:
-            transcript_data = transcribe_video(video_path, model_size=model)
+            transcript_data, speaker_turns = active_transcriber.transcribe(
+                video_path, work_dir=output_dir, diarizer=diarizer
+            )
             transcript_segments = transcript_data["segments"]
             transcript_path = output_dir / "transcript.json"
+
+            diarization_info = None
+            if speaker_turns:
+                diarization_info = {
+                    "provider": diarizer.provider if diarizer else active_transcriber.provider,
+                    "model": diarizer.model if diarizer else active_transcriber.model,
+                    "speakers": sorted({turn["speaker"] for turn in speaker_turns}),
+                    "turns": speaker_turns,
+                }
+            elif any(segment.get("speaker") for segment in transcript_segments):
+                diarization_info = {
+                    "provider": active_transcriber.provider,
+                    "model": active_transcriber.model,
+                    "speakers": sorted(
+                        {
+                            segment["speaker"]
+                            for segment in transcript_segments
+                            if segment.get("speaker")
+                        }
+                    ),
+                    "turns": [],
+                }
+
             transcript_path.write_text(
                 json.dumps(
                     {
-                        "model": model,
+                        "schema": TRANSCRIPT_SCHEMA,
+                        "provider": active_transcriber.provider,
+                        "model": active_transcriber.model,
                         "language": transcript_data["language"],
+                        "diarization": diarization_info,
                         "segments": transcript_segments,
                     },
                     indent=2,
@@ -594,11 +654,16 @@ def process_video(
             clear_stage_failure(output_dir, "transcription")
         except Exception as exc:
             error_msg = f"Transcription failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Start a Whisper-compatible server on 127.0.0.1:8427\n"
-            error_msg += (
-                "   (e.g. whisper.cpp's whisper-server --inference-path /v1/audio/transcriptions)\n"
-            )
-            error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
+            if active_transcriber.provider == "voxtral":
+                error_msg += "1. Check MISTRAL_API_KEY is set and valid\n"
+                error_msg += "2. Or pass --local to transcribe with the local Whisper server\n"
+            else:
+                error_msg += "1. Start a Whisper-compatible server on 127.0.0.1:8427\n"
+                error_msg += (
+                    "   (e.g. whisper.cpp's whisper-server "
+                    "--inference-path /v1/audio/transcriptions)\n"
+                )
+                error_msg += "2. Verify the service accepts POST /v1/audio/transcriptions\n"
             logger.error(error_msg)
             mark_stage_failed(output_dir, "transcription", error_msg)
             raise RuntimeError(error_msg) from exc

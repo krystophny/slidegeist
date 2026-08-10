@@ -287,16 +287,21 @@ def test_transcription_failure_stops_before_downstream_export(
     _write_slide(tmp_path, 1)
     (tmp_path / "slides.md").write_text(_section(1), encoding="utf-8")
 
-    def fail_transcription(*_: object, **__: object) -> object:
-        raise RuntimeError("independent transcription failure")
+    class FailingTranscriber:
+        name = "failing fixture"
+        provider = "fake"
+        model = "fake-model"
+        provides_speakers = False
+
+        def transcribe(self, *_: object, **__: object) -> object:
+            raise RuntimeError("independent transcription failure")
 
     def unexpected_export(*_: object, **__: object) -> None:
         pytest.fail("pipeline continued after required transcription failure")
 
-    monkeypatch.setattr(pipeline, "transcribe_video", fail_transcription)
     monkeypatch.setattr(pipeline, "export_slides_json", unexpected_export)
 
     with pytest.raises(RuntimeError, match="independent transcription failure"):
-        process_video(video, tmp_path)
+        process_video(video, tmp_path, transcriber=FailingTranscriber())
 
     assert (tmp_path / ".transcription_failed").exists()

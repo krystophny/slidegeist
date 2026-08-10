@@ -39,14 +39,23 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
             paths.append((index, start, end, slide_path))
         return paths
 
-    def fake_transcribe_video(*_: Any, **__: Any) -> dict[str, Any]:
-        return {
-            "language": "en",
-            "segments": [
-                {"start": 0.0, "end": 1.0, "text": "Hello", "words": []},
-                {"start": 2.0, "end": 3.0, "text": "World", "words": []},
-            ],
-        }
+    class FakeTranscriber:
+        name = "independent fixture transcriber"
+        provider = "fake"
+        model = "fake-model"
+        provides_speakers = False
+
+        def transcribe(self, *_: Any, **__: Any) -> tuple[dict[str, Any], list[Any]]:
+            return (
+                {
+                    "language": "en",
+                    "segments": [
+                        {"start": 0.0, "end": 1.0, "text": "Hello", "words": []},
+                        {"start": 2.0, "end": 3.0, "text": "World", "words": []},
+                    ],
+                },
+                [],
+            )
 
     class FakeDescriber:
         name = "independent fixture"
@@ -63,7 +72,6 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
 
     monkeypatch.setattr("slidegeist.pipeline.detect_scenes", fake_detect_scenes)
     monkeypatch.setattr("slidegeist.pipeline.extract_slides", fake_extract_slides)
-    monkeypatch.setattr("slidegeist.pipeline.transcribe_video", fake_transcribe_video)
     monkeypatch.setattr(
         "slidegeist.ai_description.build_ai_describer", FakeDescriber
     )
@@ -79,6 +87,7 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
         start_offset=0.0,
         model="tiny",
         image_format="png",
+        transcriber=FakeTranscriber(),
     )
 
     slides = result.get("slides")

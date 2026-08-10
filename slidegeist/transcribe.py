@@ -247,47 +247,57 @@ CHUNK_DURATION_S = 120  # 2-minute chunks to stay within server upload limits
 
 
 def _split_audio_chunks(
-    audio_path: Path, chunk_dir: Path, chunk_duration: int = CHUNK_DURATION_S
+    audio_path: Path,
+    chunk_dir: Path,
+    chunk_duration: int = CHUNK_DURATION_S,
+    suffix: str = "wav",
 ) -> list[Path]:
-    """Split a WAV file into fixed-length chunks using ffmpeg segment muxer."""
+    """Split an audio file into fixed-length chunks using ffmpeg segment muxer."""
     import subprocess as _sp
 
     chunk_dir.mkdir(parents=True, exist_ok=True)
-    pattern = str(chunk_dir / "chunk_%04d.wav")
-    cmd = [
-        "ffmpeg",
-        "-i",
-        str(audio_path),
-        "-f",
-        "segment",
-        "-segment_time",
-        str(chunk_duration),
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        "-acodec",
-        "pcm_s16le",
-        "-y",
-        pattern,
-    ]
+    pattern = str(chunk_dir / f"chunk_%04d.{suffix}")
+    cmd = ["ffmpeg", "-i", str(audio_path), "-f", "segment", "-segment_time", str(chunk_duration)]
+    if suffix == "wav":
+        cmd += ["-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le"]
+    else:
+        # Already encoded for upload; re-encoding would only lose quality.
+        cmd += ["-c", "copy"]
+    cmd += ["-y", pattern]
     _sp.run(cmd, check=True, capture_output=True, text=True)
-    chunks = sorted(chunk_dir.glob("chunk_*.wav"))
+    chunks = sorted(chunk_dir.glob(f"chunk_*.{suffix}"))
     logger.info("Split audio into %d chunks of %ds each", len(chunks), chunk_duration)
     return chunks
 
 
+def _measure_duration(path: Path) -> float | None:
+    """Return an audio file's duration, or None when it cannot be measured.
+
+    PCM is measured exactly from the sample count; anything else (Opus, MP3)
+    falls back to ffprobe, since :mod:`wave` cannot read it.
+    """
+    try:
+        with wave.open(str(path), "rb") as stream:
+            frame_rate = stream.getframerate()
+            if frame_rate:
+                return stream.getnframes() / frame_rate
+    except (OSError, EOFError, wave.Error, ZeroDivisionError):
+        pass
+
+    try:
+        return get_video_duration(path)
+    except Exception:
+        return None
+
+
 def _chunk_start_offsets(chunks: list[Path]) -> list[float]:
-    """Measure cumulative PCM sample time instead of assuming exact segment cuts."""
+    """Measure cumulative audio time instead of assuming exact segment cuts."""
     offsets = []
     offset = 0.0
     for chunk in chunks:
         offsets.append(offset)
-        try:
-            with wave.open(str(chunk), "rb") as stream:
-                frame_rate = stream.getframerate()
-                duration = stream.getnframes() / frame_rate
-        except (OSError, EOFError, wave.Error, ZeroDivisionError):
+        duration = _measure_duration(chunk)
+        if duration is None:
             logger.warning(
                 "Could not measure %s; falling back to nominal chunk duration",
                 chunk,
@@ -300,15 +310,25 @@ def _chunk_start_offsets(chunks: list[Path]) -> list[float]:
 def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
+    *,
+    diarizer: object | None = None,
+    diarization_cache: Path | None = None,
+    speaker_turns: list | None = None,
 ) -> TranscriptResult:
     """Extract audio and transcribe it via the configured Whisper HTTP server.
 
     Long audio is automatically split into 2-minute chunks to stay within
     server upload size limits, then reassembled with corrected timestamps.
+
+    When ``diarizer`` is given, the full-length audio is diarized before
+    chunking and the resulting turns are appended to ``speaker_turns``.
     """
 
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    if speaker_turns is None:
+        speaker_turns = []
 
     try:
         video_duration = get_video_duration(video_path)
@@ -327,6 +347,12 @@ def transcribe_video(
         temp = Path(temp_dir)
         audio_path = temp / f"{video_path.stem}.wav"
         extract_audio(video_path, audio_path)
+
+        # Diarize the whole audio before chunking: speaker clustering inside a
+        # 2-minute chunk cannot be reconciled across chunks, and the full-length
+        # audio is already on the original timeline.
+        if diarizer is not None:
+            speaker_turns.extend(diarizer.diarize(audio_path, cache_path=diarization_cache))
 
         chunks = _split_audio_chunks(audio_path, temp / "chunks")
 

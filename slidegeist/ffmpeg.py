@@ -105,6 +105,54 @@ def detect_scenes(
     return analysis.timestamps
 
 
+def extract_audio_compressed(
+    video_path: Path,
+    output_path: Path,
+    bitrate: str = "16k",
+    sample_rate: int = 16000,
+) -> None:
+    """Extract audio as mono Opus for upload to a remote transcription API.
+
+    A 90-minute lecture is roughly 170 MB as 16 kHz PCM but about 11 MB as
+    16 kbit/s Opus, which is the difference between a usable remote path and a
+    timeout. Speech at this bitrate is well within Opus's design range.
+
+    Args:
+        video_path: Path to the video or audio file.
+        output_path: Path where the .ogg file will be saved.
+        bitrate: Target Opus bitrate.
+        sample_rate: Output sample rate in Hz.
+
+    Raises:
+        FFmpegError: If audio extraction fails.
+    """
+    if not check_ffmpeg_available():
+        raise FFmpegError("FFmpeg not found. Please install FFmpeg.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-i", str(video_path),
+        "-vn",
+        "-c:a", "libopus",
+        "-b:a", bitrate,
+        "-ac", "1",
+        "-ar", str(sample_rate),
+        "-application", "voip",
+        "-y",
+        str(output_path),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise FFmpegError(f"Failed to extract compressed audio: {exc.stderr}") from exc
+
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise FFmpegError(f"Compressed audio extraction produced no output: {output_path}")
+
+
 def extract_audio(
     video_path: Path,
     output_path: Path,
