@@ -9,6 +9,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 import uuid
 from functools import lru_cache
 from http.client import HTTPConnection, HTTPResponse, HTTPSConnection
@@ -18,7 +19,12 @@ from urllib import error, parse, request
 
 from PIL import Image, ImageOps
 
-from slidegeist.constants import DEFAULT_LLAMACPP_URL, DEFAULT_WHISPER_URL
+from slidegeist.constants import (
+    DEFAULT_LLAMACPP_URL,
+    DEFAULT_MISTRAL_URL,
+    DEFAULT_VOXTRAL_MODEL,
+    DEFAULT_WHISPER_URL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,29 @@ def get_llama_cpp_url() -> str:
 def get_whisper_url() -> str:
     """Return the configured Whisper server base URL."""
     return os.getenv("SLIDEGEIST_WHISPER_URL", DEFAULT_WHISPER_URL).rstrip("/")
+
+
+def get_mistral_url() -> str:
+    """Return the configured Mistral API base URL."""
+    return os.getenv("SLIDEGEIST_MISTRAL_URL", DEFAULT_MISTRAL_URL).rstrip("/")
+
+
+def get_mistral_api_key() -> str | None:
+    """Return the Mistral API key, or None when unset.
+
+    ``SLIDEGEIST_MISTRAL_API_KEY`` wins so a project-specific key can override
+    the vendor-standard ``MISTRAL_API_KEY`` that other tools already read.
+    """
+    for name in ("SLIDEGEIST_MISTRAL_API_KEY", "MISTRAL_API_KEY"):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def get_voxtral_model() -> str:
+    """Return the configured Voxtral model id."""
+    return os.getenv("SLIDEGEIST_VOXTRAL_MODEL", DEFAULT_VOXTRAL_MODEL).strip()
 
 
 def get_llama_cpp_model_override() -> str | None:
@@ -281,6 +310,59 @@ def _read_response(response: HTTPResponse) -> dict[str, Any]:
     return json.loads(raw) if raw else {}
 
 
+def _redacted(headers: dict[str, str]) -> dict[str, str]:
+    """Return headers with credentials masked, safe for logging."""
+    return {
+        key: ("<redacted>" if key.lower() == "authorization" else value)
+        for key, value in headers.items()
+    }
+
+
+def _post_multipart_file(
+    endpoint: parse.SplitResult,
+    fields: list[tuple[str, str]],
+    file_path: Path,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: float,
+) -> tuple[int, dict[str, Any]]:
+    """POST a multipart form with one streamed file, returning (status, payload).
+
+    The file is streamed in 1 MiB blocks so large audio uploads are never held
+    in memory.
+    """
+    boundary = f"slidegeist-{uuid.uuid4().hex}"
+    prefix, suffix = _build_multipart_prefix(boundary, fields, "file", file_path)
+    content_length = len(prefix) + file_path.stat().st_size + len(suffix)
+
+    path = endpoint.path or "/"
+    if endpoint.query:
+        path = f"{path}?{endpoint.query}"
+
+    connection = _connection_for(endpoint, timeout)
+    try:
+        connection.putrequest("POST", path)
+        connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+        connection.putheader("Content-Length", str(content_length))
+        for key, value in (headers or {}).items():
+            connection.putheader(key, value)
+        connection.endheaders()
+
+        connection.send(prefix)
+        with file_path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                connection.send(chunk)
+        connection.send(suffix)
+
+        response = connection.getresponse()
+        return response.status, _read_response(response)
+    finally:
+        connection.close()
+
+
 def whisper_transcribe(
     audio_path: Path,
     *,
@@ -296,7 +378,6 @@ def whisper_transcribe(
     if not endpoint.hostname:
         raise RuntimeError("Whisper URL is missing a hostname")
 
-    boundary = f"slidegeist-{uuid.uuid4().hex}"
     fields = [
         ("model", model),
         ("language", language),
@@ -304,33 +385,75 @@ def whisper_transcribe(
         ("timestamp_granularities[]", "segment"),
         ("timestamp_granularities[]", "word"),
     ]
-    prefix, suffix = _build_multipart_prefix(boundary, fields, "file", audio_path)
-    content_length = len(prefix) + audio_path.stat().st_size + len(suffix)
+    status, payload = _post_multipart_file(endpoint, fields, audio_path, timeout=timeout)
+    if status >= 400:
+        raise RuntimeError(f"whisper HTTP {status}: {payload}")
+    return payload
 
-    path = endpoint.path or "/"
-    if endpoint.query:
-        path = f"{path}?{endpoint.query}"
 
-    connection = _connection_for(endpoint, timeout)
-    try:
-        connection.putrequest("POST", path)
-        connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
-        connection.putheader("Content-Length", str(content_length))
-        connection.endheaders()
+def voxtral_transcribe(
+    audio_path: Path,
+    *,
+    model: str,
+    diarize: bool = True,
+    timeout: float = 1800.0,
+    attempts: int = 3,
+) -> dict[str, Any]:
+    """Transcribe an audio file through the Mistral Voxtral API.
 
-        connection.send(prefix)
-        with audio_path.open("rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                connection.send(chunk)
-        connection.send(suffix)
+    Note the deliberate absence of a ``language`` field: Mistral documents it as
+    incompatible with ``timestamp_granularities``, so sending it (as the Whisper
+    request does) fails every request.
+    """
+    api_key = get_mistral_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "MISTRAL_API_KEY is not set; export it or use --local to transcribe "
+            "with the local Whisper server"
+        )
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        response = connection.getresponse()
-        payload = _read_response(response)
-        if response.status >= 400:
-            raise RuntimeError(f"whisper HTTP {response.status}: {payload}")
-        return payload
-    finally:
-        connection.close()
+    endpoint = parse.urlsplit(f"{get_mistral_url()}/v1/audio/transcriptions")
+    if not endpoint.hostname:
+        raise RuntimeError("Mistral URL is missing a hostname")
+
+    fields = [
+        ("model", model),
+        ("diarize", "true" if diarize else "false"),
+        ("timestamp_granularities[]", "segment"),
+        ("timestamp_granularities[]", "word"),
+    ]
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    delay = 2.0
+    last_error: str = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            status, payload = _post_multipart_file(
+                endpoint, fields, audio_path, headers=headers, timeout=timeout
+            )
+        except (TimeoutError, OSError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            status = None
+            payload = {}
+        else:
+            if status < 400:
+                return payload
+            last_error = f"voxtral HTTP {status}: {payload}"
+            if status not in (429,) and status < 500:
+                raise RuntimeError(last_error)
+
+        if attempt == attempts:
+            break
+        logger.warning(
+            "Voxtral attempt %d/%d failed (%s); retrying in %.0fs",
+            attempt,
+            attempts,
+            last_error,
+            delay,
+        )
+        time.sleep(delay)
+        delay *= 4
+
+    raise RuntimeError(f"voxtral failed after {attempts} attempts: {last_error}")
