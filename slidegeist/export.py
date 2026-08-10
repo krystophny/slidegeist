@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import tempfile
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from slidegeist.ai_description import BaseSlideDescriber
+from slidegeist.constants import DEFAULT_DESCRIBE_CONCURRENCY
 from slidegeist.ocr import OcrPipeline
 from slidegeist.transcribe import Segment
 
@@ -649,9 +652,8 @@ def run_ai_descriptions(
     elif force_redo:
         logger.info("Force redo enabled: regenerating ALL AI descriptions")
 
-    for slide_index, t_start, t_end, image_path in tqdm(
-        slide_metadata, desc="Generating AI descriptions", unit="slide"
-    ):
+    pending: list[tuple[str, Path, float, float]] = []
+    for slide_index, t_start, t_end, image_path in slide_metadata:
         slide_id = image_path.stem or f"slide_{slide_index:03d}"
 
         # Skip if already has AI description (unless force_redo)
@@ -665,9 +667,11 @@ def run_ai_descriptions(
             descriptions[slide_id] = existing_data[slide_id]["ai_description"]
             logger.debug(f"Skipping {slide_id} (already has AI description)")
             continue
+        pending.append((slide_id, image_path, t_start, t_end))
 
+    def prepare(slide_id: str, image_path: Path, t_start: float, t_end: float) -> tuple[str, str]:
+        """Collect the transcript window and OCR text for one slide."""
         transcript_text = _collect_transcript_text(transcript_segments, t_start, t_end)
-
         ocr_text = existing_data.get(slide_id, {}).get("ocr", "")
         if not ocr_text and ocr_pipeline is not None:
             try:
@@ -675,25 +679,67 @@ def run_ai_descriptions(
                 ocr_text = ocr_result.get("raw_text", "")
             except Exception as exc:
                 logger.debug(f"OCR extraction failed for {slide_id}: {exc}")
+        return transcript_text, ocr_text
 
-        try:
-            description = describer.describe(image_path, transcript_text, ocr_text)
+    def describe_one(item: tuple[str, Path, float, float]) -> tuple[str, str]:
+        slide_id, image_path, t_start, t_end = item
+        transcript_text, ocr_text = prepare(slide_id, image_path, t_start, t_end)
+        return slide_id, describer.describe(image_path, transcript_text, ocr_text)
+
+    workers = get_describe_concurrency(describer)
+    if workers > 1:
+        logger.info("Describing %d slides with %d workers", len(pending), workers)
+
+    # Results are keyed by slide_id, never by completion order, so concurrency
+    # cannot reorder the output. Each completed description is still written to
+    # disk immediately, which is what makes this stage crash-resumable.
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(describe_one, item): item[0] for item in pending}
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc="Generating AI descriptions",
+            unit="slide",
+        ):
+            slide_id = futures[future]
+            try:
+                slide_id, description = future.result()
+            except Exception as exc:
+                logger.error(f"AI description failed for {slide_id}: {exc}")
+                raise
             if description:
                 descriptions[slide_id] = description
                 logger.info(f"Generated AI description for {slide_id}")
-
-                # Immediately save to disk for crash recovery
                 if output_path:
                     _save_incremental_ai_description(
                         output_path, slide_id, description, existing_data
                     )
             else:
                 logger.warning(f"Empty AI description for {slide_id}")
-        except Exception as exc:
-            logger.error(f"AI description failed for {slide_id}: {exc}")
-            raise
 
     return descriptions
+
+
+def get_describe_concurrency(describer: object) -> int:
+    """Return how many slide descriptions may run at once.
+
+    Remote providers are rate-limited by the network, so several requests in
+    flight is a large win. The local llama.cpp server has a single slot, so
+    concurrency there would only queue requests and risk timeouts - it is
+    pinned to 1 regardless of configuration.
+    """
+    if getattr(describer, "provider", "") == "local" or "llama.cpp" in getattr(
+        describer, "name", ""
+    ):
+        return 1
+    raw = os.getenv("SLIDEGEIST_DESCRIBE_CONCURRENCY", str(DEFAULT_DESCRIBE_CONCURRENCY))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("SLIDEGEIST_DESCRIBE_CONCURRENCY must be an integer") from exc
+    if value < 1:
+        raise ValueError("SLIDEGEIST_DESCRIBE_CONCURRENCY must be at least 1")
+    return value
 
 
 def _save_incremental_ai_description(

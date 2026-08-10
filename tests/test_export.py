@@ -321,3 +321,62 @@ def test_multi_speaker_slide_window_prefixes_speakers() -> None:
     for line in rendered.splitlines():
         assert not line.startswith("#")
         assert line.strip() != "---"
+
+
+def test_local_describer_is_never_parallelised(monkeypatch) -> None:
+    """The local llama.cpp server has one slot; concurrency would only queue."""
+    from slidegeist.export import get_describe_concurrency
+
+    class Local:
+        provider = "local"
+        name = "gemma-4-26b-a4b (llama.cpp)"
+
+    class Remote:
+        provider = "openrouter"
+        name = "google/gemma-4-26b-a4b-it (OpenRouter)"
+
+    monkeypatch.setenv("SLIDEGEIST_DESCRIBE_CONCURRENCY", "16")
+    assert get_describe_concurrency(Local()) == 1, "local must stay sequential"
+    assert get_describe_concurrency(Remote()) == 16
+
+    monkeypatch.delenv("SLIDEGEIST_DESCRIBE_CONCURRENCY")
+    assert get_describe_concurrency(Remote()) == 8
+
+
+def test_concurrent_descriptions_are_keyed_by_slide_not_order(tmp_path) -> None:
+    """Out-of-order completion must not misattribute descriptions."""
+    import time
+
+    from slidegeist.export import run_ai_descriptions
+
+    class SlowFirstDescriber:
+        provider = "openrouter"
+        name = "fake (OpenRouter)"
+
+        def describe(self, image_path, transcript, ocr_text=""):
+            # slide_001 finishes last despite being submitted first
+            if image_path.stem == "slide_001":
+                time.sleep(0.2)
+            return (
+                f"0. FRAME TYPE\nSLIDE\n\n1. TITLE\n{image_path.stem}\n\n"
+                "2. TEXT CONTENT\nx\n\n3. FORMULAS\nNone\n\n"
+                "4. VISUAL ELEMENTS\nNone\n\n5. LAYOUT\nOne column"
+            )
+
+    meta = []
+    for index in (1, 2, 3):
+        path = tmp_path / f"slide_{index:03d}.jpg"
+        path.write_bytes(b"x")
+        meta.append((index, float(index), float(index + 1), path))
+
+    result = run_ai_descriptions(
+        slide_metadata=meta,
+        transcript_segments=[],
+        describer=SlowFirstDescriber(),
+        ocr_pipeline=None,
+        output_path=None,
+    )
+
+    assert set(result) == {"slide_001", "slide_002", "slide_003"}
+    for slide_id in result:
+        assert f"1. TITLE\n{slide_id}" in result[slide_id], "description bound to wrong slide"

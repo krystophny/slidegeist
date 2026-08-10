@@ -39,6 +39,9 @@ DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api"
 DEFAULT_DESCRIBER = "openrouter"
 DEFAULT_OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it"
 DEFAULT_LOCAL_DESCRIBE_MODEL = "gemma-4-26b-a4b"
+# Remote description runs several requests in flight; the local llama.cpp
+# server has one slot and is pinned to 1 in get_describe_concurrency().
+DEFAULT_DESCRIBE_CONCURRENCY = 8
 
 # Speaker diarization. DiariZen runs in a separate interpreter: its weights are
 # CC BY-NC 4.0 and torch has no wheels for the 3.14 host interpreter.
