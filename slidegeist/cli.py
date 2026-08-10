@@ -120,21 +120,25 @@ def handle_process(args: argparse.Namespace) -> None:
         # deliberately no fallback between providers: silently switching would
         # either upload audio meant to stay local, or bill for a run expected
         # to be free.
-        # --local is the single switch for "nothing leaves this machine".
-        local_only = getattr(args, "local", False)
-        provider = "whisper" if local_only else getattr(args, "transcriber", DEFAULT_TRANSCRIBER)
-        describer_provider = (
-            "local" if local_only else getattr(args, "describer", DEFAULT_DESCRIBER)
-        )
+        # --cloud is the single switch for "this run may leave the machine".
+        # Everything is local by default; per-stage flags still win if given.
+        cloud = getattr(args, "cloud", False)
+        provider = getattr(args, "transcriber", DEFAULT_TRANSCRIBER)
+        describer_provider = getattr(args, "describer", DEFAULT_DESCRIBER)
+        if cloud:
+            if provider == DEFAULT_TRANSCRIBER:
+                provider = "voxtral"
+            if describer_provider == DEFAULT_DESCRIBER:
+                describer_provider = "openrouter"
         if describer_provider == "openrouter" and not get_openrouter_api_key():
             logger.error(
-                "OPENROUTER_API_KEY is not set. Export it, or pass --local to "
+                "OPENROUTER_API_KEY is not set. Export it, or drop --cloud to "
                 "describe slides with the local llama.cpp server."
             )
             sys.exit(1)
         if provider == "voxtral" and not get_mistral_api_key():
             logger.error(
-                "MISTRAL_API_KEY is not set. Export it, or pass --local to "
+                "MISTRAL_API_KEY is not set. Export it, or drop --cloud to "
                 "transcribe with the local Whisper server."
             )
             sys.exit(1)
@@ -368,11 +372,12 @@ Examples:
         ),
     )
     process_parser.add_argument(
-        "--local",
+        "--cloud",
         action="store_true",
         help=(
-            "Keep everything on this machine: local Whisper for audio and the "
-            "local llama.cpp server for slide descriptions (this is the default)"
+            "Send this run to the cloud: Voxtral for audio and Gemma 4 via "
+            "OpenRouter for slide descriptions. Off by default - everything "
+            "stays on this machine unless you ask for it."
         ),
     )
     process_parser.add_argument(

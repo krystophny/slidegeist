@@ -277,13 +277,13 @@ opt-in with `--transcriber voxtral`.
 
 ```bash
 slidegeist lecture.mp4                    # local Whisper + local descriptions
-slidegeist lecture.mp4 --transcriber voxtral   # Voxtral, speaker labels included
+slidegeist lecture.mp4 --cloud            # Voxtral audio + Gemma 4 descriptions
 slidegeist lecture.mp4 --diarize local    # force DiariZen for speaker labels
 slidegeist lecture.mp4 --diarize off      # no speaker labels
 ```
 
 There is deliberately **no automatic fallback** between providers: a missing
-`MISTRAL_API_KEY` is an error naming `--local`, never a silent switch that would
+`MISTRAL_API_KEY` is an error telling you to drop `--cloud`, never a silent switch that would
 upload audio meant to stay local (or bill for a run expected to be free). Both
 preconditions are checked before any download starts.
 
@@ -314,7 +314,7 @@ OpenRouter is opt-in with `--describer openrouter`.
 
 ```bash
 slidegeist lecture.mp4                          # fully local (default)
-slidegeist lecture.mp4 --describer openrouter   # Gemma 4 descriptions
+slidegeist lecture.mp4 --cloud                  # Voxtral + Gemma 4 (opt-in)
 ```
 
 ⚠️ **Do not make Gemma the pipeline default.** Over a full 40-frame lecture it
@@ -333,7 +333,7 @@ behind a separate classification pass.
 | `SLIDEGEIST_DESCRIBER` | `local` | Default backend |
 
 As with transcription, there is **no automatic fallback**: a missing key is an
-error naming `--local`.
+error telling you to drop `--cloud`.
 
 ### What the measurements showed
 

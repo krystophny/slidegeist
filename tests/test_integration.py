@@ -178,17 +178,18 @@ def test_cli_defaults_to_local_and_needs_no_keys(
     assert calls[0]["describer_provider"] == "local"
 
 
-def test_cli_local_flag_selects_whisper(
+def test_cloud_flag_selects_both_remote_backends(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """--local must not require a Mistral key and must not silently fall back."""
+    """--cloud is the single switch that lets a run leave the machine."""
     calls: list[dict[str, Any]] = []
 
     def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
         return {"output_dir": tmp_path, "slides": [], "slides_md": tmp_path / "slides.md"}
 
-    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
     monkeypatch.setattr(
@@ -196,14 +197,14 @@ def test_cli_local_flag_selects_whisper(
         lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
     )
     monkeypatch.setattr(
-        sys, "argv", ["slidegeist", "process", str(tmp_path / "input.mp4"), "--local"]
+        sys, "argv", ["slidegeist", "process", str(tmp_path / "input.mp4"), "--cloud"]
     )
 
     cli.main()
 
-    assert calls and calls[0]["provider"] == "whisper"
-    assert calls[0]["describer_provider"] == "local", (
-        "--local must keep slide descriptions on this machine too"
+    assert calls and calls[0]["provider"] == "voxtral"
+    assert calls[0]["describer_provider"] == "openrouter", (
+        "--cloud must move slide descriptions off this machine too"
     )
 
 
