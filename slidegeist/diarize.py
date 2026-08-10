@@ -25,6 +25,7 @@ from slidegeist.constants import (
     DEFAULT_DIARIZE_MODE,
     DEFAULT_DIARIZEN_MODEL,
     DEFAULT_DIARIZEN_TIMEOUT,
+    DIARIZE_MODES,
 )
 from slidegeist.transcribe import Segment, SpeakerShare
 
@@ -168,6 +169,24 @@ class DiariZenDiarizer(BaseDiarizer):
             raise RuntimeError("Diarization payload has no turn list")
         logger.info("Diarization found %d turns", len(turns))
         return turns
+
+
+def get_diarize_mode() -> str:
+    """Return the configured default diarization mode.
+
+    ``SLIDEGEIST_DIARIZE`` lets a caller that cannot pass flags - a batch
+    driver, a systemd unit, a skill wrapper - turn speaker labelling off for
+    every run. An unknown value is rejected here rather than several minutes
+    later, once transcription has already happened.
+    """
+    mode = os.getenv("SLIDEGEIST_DIARIZE", "").strip().lower()
+    if not mode:
+        return DEFAULT_DIARIZE_MODE
+    if mode not in DIARIZE_MODES:
+        raise ValueError(
+            f"SLIDEGEIST_DIARIZE={mode!r} is not one of {', '.join(DIARIZE_MODES)}"
+        )
+    return mode
 
 
 def build_diarizer(mode: str = DEFAULT_DIARIZE_MODE) -> BaseDiarizer | None:
@@ -329,4 +348,5 @@ __all__ = [
     "assign_speakers",
     "build_diarizer",
     "canonicalize_speaker_ids",
+    "get_diarize_mode",
 ]

@@ -279,7 +279,14 @@ opt-in with `--transcriber voxtral`.
 slidegeist lecture.mp4                    # local Whisper + local descriptions
 slidegeist lecture.mp4 --cloud            # Voxtral audio + Gemma 4 descriptions
 slidegeist lecture.mp4 --diarize local    # force DiariZen for speaker labels
-slidegeist lecture.mp4 --diarize off      # no speaker labels
+slidegeist lecture.mp4 --no-diarize       # no speaker labels (= --diarize off)
+```
+
+Single-lecturer material gains nothing from speaker labels, so batch drivers
+can switch diarization off for a whole run without touching every call site:
+
+```bash
+export SLIDEGEIST_DIARIZE=off
 ```
 
 There is deliberately **no automatic fallback** between providers: a missing
@@ -295,6 +302,7 @@ preconditions are checked before any download starts.
 | `SLIDEGEIST_VOXTRAL_MODEL` | `voxtral-mini-latest` | Model id |
 | `SLIDEGEIST_VOXTRAL_MAX_CHUNK_S` | `3000` | Split threshold for long audio |
 | `SLIDEGEIST_TRANSCRIBER` | `whisper` | Default backend |
+| `SLIDEGEIST_DIARIZE` | `auto` | Default diarization mode; `off` disables it everywhere |
 | `SLIDEGEIST_DIARIZEN_PYTHON` | – | Interpreter with DiariZen installed |
 | `SLIDEGEIST_DIARIZEN_MODEL` | `BUT-FIT/diarizen-wavlm-large-s80-md` | Diarization model |
 | `SLIDEGEIST_DIARIZEN_DEVICE` | `auto` | `cpu`, `cuda` or `auto` |

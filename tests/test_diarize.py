@@ -226,6 +226,26 @@ def test_build_diarizer_modes(monkeypatch) -> None:
         build_diarizer("banana")
 
 
+def test_env_var_sets_the_default_mode(monkeypatch) -> None:
+    """A batch driver that cannot pass flags must still be able to opt out."""
+    monkeypatch.delenv("SLIDEGEIST_DIARIZE", raising=False)
+    assert diarize.get_diarize_mode() == "auto"
+
+    monkeypatch.setenv("SLIDEGEIST_DIARIZE", "off")
+    assert diarize.get_diarize_mode() == "off"
+
+    monkeypatch.setenv("SLIDEGEIST_DIARIZE", "  OFF  ")
+    assert diarize.get_diarize_mode() == "off"
+
+
+def test_unknown_env_mode_fails_before_any_work(monkeypatch) -> None:
+    """A typo must not silently leave diarization on for a whole batch."""
+    monkeypatch.setenv("SLIDEGEIST_DIARIZE", "none")
+
+    with pytest.raises(ValueError, match="SLIDEGEIST_DIARIZE"):
+        diarize.get_diarize_mode()
+
+
 def test_gpu_oom_raises_instead_of_falling_back_to_cpu(monkeypatch, tmp_path) -> None:
     """An OOM on a 32 GB machine is a misconfiguration, not a reason to go slow."""
     calls: list[str] = []

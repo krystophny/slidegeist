@@ -19,7 +19,9 @@ from slidegeist.constants import (
     DEFAULT_TRANSCRIBER,
     DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_MODEL,
+    DIARIZE_MODES,
 )
+from slidegeist.diarize import get_diarize_mode
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
 from slidegeist.ffmpeg import check_ffmpeg_available
 from slidegeist.services import get_mistral_api_key, get_openrouter_api_key
@@ -142,7 +144,12 @@ def handle_process(args: argparse.Namespace) -> None:
                 "transcribe with the local Whisper server."
             )
             sys.exit(1)
-        if getattr(args, "diarize", DEFAULT_DIARIZE_MODE) == "local" and not os.getenv(
+        try:
+            diarize_mode = getattr(args, "diarize", None) or get_diarize_mode()
+        except ValueError as exc:
+            logger.error("%s", exc)
+            sys.exit(1)
+        if diarize_mode == "local" and not os.getenv(
             "SLIDEGEIST_DIARIZEN_PYTHON", ""
         ).strip():
             logger.error(
@@ -184,7 +191,7 @@ def handle_process(args: argparse.Namespace) -> None:
             retry_failed=getattr(args, 'retry_failed', False),
             force_redo_ai=getattr(args, 'force_redo_ai', False),
             provider=provider,
-            diarize=getattr(args, 'diarize', DEFAULT_DIARIZE_MODE),
+            diarize=diarize_mode,
             describer_provider=describer_provider,
         )
 
@@ -382,13 +389,21 @@ Examples:
     )
     process_parser.add_argument(
         "--diarize",
-        default=DEFAULT_DIARIZE_MODE,
-        choices=["auto", "local", "provider", "off"],
+        default=None,
+        choices=list(DIARIZE_MODES),
         help=(
             "Speaker diarization: auto uses the provider's own labels or local "
             "DiariZen when configured, local forces DiariZen, provider trusts the "
-            f"transcriber, off disables it (default: {DEFAULT_DIARIZE_MODE})"
+            f"transcriber, off disables it (default: {DEFAULT_DIARIZE_MODE}, "
+            "overridable with SLIDEGEIST_DIARIZE)"
         ),
+    )
+    process_parser.add_argument(
+        "--no-diarize",
+        dest="diarize",
+        action="store_const",
+        const="off",
+        help="Transcribe without speaker labels. Alias for --diarize off.",
     )
     process_parser.add_argument(
         "--split",

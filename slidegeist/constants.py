@@ -55,6 +55,7 @@ DEFAULT_DESCRIBE_CONCURRENCY = 8
 # CC BY-NC 4.0 and torch has no wheels for the 3.14 host interpreter.
 DEFAULT_DIARIZEN_MODEL = "BUT-FIT/diarizen-wavlm-large-s80-md"
 DEFAULT_DIARIZE_MODE = "auto"
+DIARIZE_MODES = ("auto", "local", "provider", "off")
 DEFAULT_DIARIZEN_TIMEOUT = 7200.0
 
 # Output formats
