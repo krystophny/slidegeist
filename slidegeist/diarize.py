@@ -139,8 +139,17 @@ class DiariZenDiarizer(BaseDiarizer):
 
         if completed.returncode != 0:
             if device != "cpu" and "out of memory" in (completed.stderr or "").lower():
-                logger.warning("DiariZen ran out of GPU memory; retrying on CPU")
-                return self._run_worker(audio_path, device="cpu")
+                # Deliberately not falling back to CPU. This machine has 32 GB of
+                # VRAM across two cards; an OOM here means something is
+                # misconfigured (context too large, a stale model still resident),
+                # and silently dropping to CPU would turn a 2-minute job into an
+                # hour while hiding the real problem.
+                raise RuntimeError(
+                    "DiariZen ran out of GPU memory. Not falling back to CPU - fix the "
+                    "allocation instead: check what else holds VRAM (llama.cpp context "
+                    "size, a stale model), or set SLIDEGEIST_DIARIZEN_DEVICE=cpu "
+                    "explicitly if you really want the slow path.\n" + stderr_tail
+                )
             raise RuntimeError(f"DiariZen failed (exit {completed.returncode}):\n{stderr_tail}")
 
         if stderr_tail:

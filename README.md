@@ -380,6 +380,13 @@ export SLIDEGEIST_DIARIZEN_PYTHON=~/.venvs/diarizen311/bin/python
 Diarization answers *when each voice speaks*, not *who they are*: labels are
 `SPEAKER_00`, `SPEAKER_01`, … and are local to one recording.
 
+**A CUDA OOM is an error, not a reason to go slow.** DiariZen does not fall back
+to CPU on its own: on a machine with enough VRAM an OOM means something is
+misconfigured (an oversized llama.cpp context, a stale model still resident),
+and silently dropping to CPU turns a two-minute job into an hour while hiding
+the cause. Set `SLIDEGEIST_DIARIZEN_DEVICE=cpu` if you deliberately want the
+slow path.
+
 ## Downloading from Opencast / TU Graz TUbe
 
 `slidegeist https://tube.tugraz.at/play/<uuid>` downloads directly, before

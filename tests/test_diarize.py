@@ -224,3 +224,20 @@ def test_build_diarizer_modes(monkeypatch) -> None:
         build_diarizer("local")
     with pytest.raises(ValueError, match="Unknown diarization mode"):
         build_diarizer("banana")
+
+
+def test_gpu_oom_raises_instead_of_falling_back_to_cpu(monkeypatch, tmp_path) -> None:
+    """An OOM on a 32 GB machine is a misconfiguration, not a reason to go slow."""
+    calls: list[str] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command[command.index("--device") + 1])
+        return subprocess.CompletedProcess(command, 1, "", "CUDA error: out of memory")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    diarizer = DiariZenDiarizer(interpreter="/usr/bin/python3.11", model="m", device="cuda")
+
+    with pytest.raises(RuntimeError, match="Not falling back to CPU"):
+        diarizer.diarize(tmp_path / "audio.wav")
+
+    assert calls == ["cuda"], "must not silently retry on CPU"
