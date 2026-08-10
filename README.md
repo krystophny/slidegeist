@@ -304,7 +304,7 @@ preconditions are checked before any download starts.
 
 Voxtral **cannot return word timing and speaker labels together**: setting
 `diarize=true` forces segment granularity. Speaker labels win. When word-level
-timing matters, use `--local`, which gets word timing from whisper.cpp and
+timing matters, stay on the local default, which gets word timing from whisper.cpp and
 speaker turns from DiariZen independently.
 
 ## Slide description providers
@@ -387,7 +387,7 @@ See [the transition-detection design and oracle benchmark](docs/transition-detec
    *who* they are. Labels are local to one recording; recognising the same
    person across recordings would need a separate enrollment step.
  - Voxtral cannot return word timing together with speaker labels; use
-   `--local` when word-level timing matters.
+   the local default when word-level timing matters.
 - No automatic slide deduplication
 
 ## Development
