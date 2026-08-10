@@ -270,13 +270,72 @@ export SLIDEGEIST_LLAMACPP_MAX_TOKENS=1024
 export SLIDEGEIST_WHISPER_URL=http://127.0.0.1:8427
 ```
 
+## Transcription providers
+
+Two backends. **Voxtral (Mistral) is the default**; `--local` keeps the audio on
+this machine by using the Whisper-compatible server instead.
+
+```bash
+slidegeist lecture.mp4                    # Voxtral, speaker labels included
+slidegeist lecture.mp4 --local            # local Whisper server
+slidegeist lecture.mp4 --diarize local    # force DiariZen for speaker labels
+slidegeist lecture.mp4 --diarize off      # no speaker labels
+```
+
+There is deliberately **no automatic fallback** between providers: a missing
+`MISTRAL_API_KEY` is an error naming `--local`, never a silent switch that would
+upload audio meant to stay local (or bill for a run expected to be free). Both
+preconditions are checked before any download starts.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MISTRAL_API_KEY` | – | Voxtral auth (vendor-standard name) |
+| `SLIDEGEIST_MISTRAL_API_KEY` | – | Override, checked first |
+| `SLIDEGEIST_MISTRAL_URL` | `https://api.mistral.ai` | Proxy/gateway override |
+| `SLIDEGEIST_VOXTRAL_MODEL` | `voxtral-mini-latest` | Model id |
+| `SLIDEGEIST_VOXTRAL_MAX_CHUNK_S` | `3000` | Split threshold for long audio |
+| `SLIDEGEIST_TRANSCRIBER` | `voxtral` | Default backend |
+| `SLIDEGEIST_DIARIZEN_PYTHON` | – | Interpreter with DiariZen installed |
+| `SLIDEGEIST_DIARIZEN_MODEL` | `BUT-FIT/diarizen-wavlm-large-s80-md` | Diarization model |
+| `SLIDEGEIST_DIARIZEN_DEVICE` | `auto` | `cpu`, `cuda` or `auto` |
+| `SLIDEGEIST_DIARIZEN_TIMEOUT` | `7200` | Subprocess timeout (seconds) |
+
+### Provider trade-off
+
+Voxtral **cannot return word timing and speaker labels together**: setting
+`diarize=true` forces segment granularity. Speaker labels win. When word-level
+timing matters, use `--local`, which gets word timing from whisper.cpp and
+speaker turns from DiariZen independently.
+
+### Speaker diarization
+
+Local diarization uses [DiariZen](https://github.com/BUTSpeechFIT/DiariZen) in a
+**separate interpreter**, for two reasons: torch has no wheels for Python 3.14,
+and DiariZen's pretrained weights are CC BY-NC 4.0 (non-commercial), so they
+must not become a dependency of this MIT-licensed package. Slidegeist only ever
+shells out to an interpreter you configure.
+
+```bash
+python3.11 -m venv ~/.venvs/diarizen311
+git clone --recurse-submodules https://github.com/BUTSpeechFIT/DiariZen
+# follow DiariZen's install instructions inside that venv, then:
+export SLIDEGEIST_DIARIZEN_PYTHON=~/.venvs/diarizen311/bin/python
+```
+
+Diarization answers *when each voice speaks*, not *who they are*: labels are
+`SPEAKER_00`, `SPEAKER_01`, … and are local to one recording.
+
 ## Limitations
 
 - Transition detection can still miss very small incremental builds or mistake a full-screen animation for a slide. Inspect `transition_detection.json` and extracted frames.
 
 See [the transition-detection design and oracle benchmark](docs/transition-detection.md).
  - `--scene-threshold` is still bounded between 0.0 and 1.0. Values outside this range will be rejected by the CLI validator.
- - No speaker diarization
+ - Speaker diarization identifies *how many* voices and *when* they speak, not
+   *who* they are. Labels are local to one recording; recognising the same
+   person across recordings would need a separate enrollment step.
+ - Voxtral cannot return word timing together with speaker labels; use
+   `--local` when word-level timing matters.
 - No automatic slide deduplication
 
 ## Development
