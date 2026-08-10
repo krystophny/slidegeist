@@ -145,10 +145,15 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "Processing complete" in captured.out
 
 
-def test_cli_defaults_to_voxtral_and_requires_a_key(
+def test_cli_defaults_to_local_and_needs_no_keys(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Without a key the default provider must stop before doing any work."""
+    """The default run is fully local and must not require any API key.
+
+    Cloud description was reverted as the default: over a full lecture, Gemma
+    classified 36-38 of 40 genuine teaching pages as NON-SLIDE, which would make
+    the pipeline delete them.
+    """
     calls: list[dict[str, Any]] = []
 
     def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
@@ -157,6 +162,7 @@ def test_cli_defaults_to_voxtral_and_requires_a_key(
 
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     monkeypatch.delenv("SLIDEGEIST_MISTRAL_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
     monkeypatch.setattr(
@@ -165,10 +171,11 @@ def test_cli_defaults_to_voxtral_and_requires_a_key(
     )
     monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
 
-    with pytest.raises(SystemExit):
-        cli.main()
+    cli.main()
 
-    assert not calls, "must fail before any download or processing"
+    assert calls, "a fully local run must proceed without any API key"
+    assert calls[0]["provider"] == "whisper"
+    assert calls[0]["describer_provider"] == "local"
 
 
 def test_cli_local_flag_selects_whisper(
@@ -200,10 +207,10 @@ def test_cli_local_flag_selects_whisper(
     )
 
 
-def test_default_run_uses_openrouter_describer(
+def test_cloud_providers_are_opt_in(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Without --local, slide description defaults to OpenRouter (Gemma 4)."""
+    """Cloud backends must be reachable, but only when explicitly requested."""
     calls: list[dict[str, Any]] = []
 
     def fake_process_video(*_: Any, **kwargs: Any) -> dict[str, Any]:
@@ -218,7 +225,10 @@ def test_default_run_uses_openrouter_describer(
         "slidegeist.cli.resolve_video_path",
         lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
     )
-    monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
+    monkeypatch.setattr(sys, "argv", [
+        "slidegeist", "process", str(tmp_path / "input.mp4"),
+        "--transcriber", "voxtral", "--describer", "openrouter",
+    ])
 
     cli.main()
 
@@ -229,7 +239,7 @@ def test_default_run_uses_openrouter_describer(
 def test_missing_openrouter_key_stops_before_work(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A missing describer key is an error naming --local, never a silent fallback."""
+    """Explicitly asking for the cloud describer without a key must fail loudly."""
     calls: list[dict[str, Any]] = []
 
     monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
@@ -243,7 +253,9 @@ def test_missing_openrouter_key_stops_before_work(
         "slidegeist.cli.resolve_video_path",
         lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
     )
-    monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
+    monkeypatch.setattr(sys, "argv", [
+        "slidegeist", "process", str(tmp_path / "input.mp4"), "--describer", "openrouter",
+    ])
 
     with pytest.raises(SystemExit):
         cli.main()

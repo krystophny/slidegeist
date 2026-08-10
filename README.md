@@ -272,12 +272,12 @@ export SLIDEGEIST_WHISPER_URL=http://127.0.0.1:8427
 
 ## Transcription providers
 
-Two backends. **Voxtral (Mistral) is the default**; `--local` keeps the audio on
-this machine by using the Whisper-compatible server instead.
+Two backends. **The local Whisper server is the default**; Voxtral (Mistral) is
+opt-in with `--transcriber voxtral`.
 
 ```bash
-slidegeist lecture.mp4                    # Voxtral, speaker labels included
-slidegeist lecture.mp4 --local            # local Whisper server
+slidegeist lecture.mp4                    # local Whisper + local descriptions
+slidegeist lecture.mp4 --transcriber voxtral   # Voxtral, speaker labels included
 slidegeist lecture.mp4 --diarize local    # force DiariZen for speaker labels
 slidegeist lecture.mp4 --diarize off      # no speaker labels
 ```
@@ -294,7 +294,7 @@ preconditions are checked before any download starts.
 | `SLIDEGEIST_MISTRAL_URL` | `https://api.mistral.ai` | Proxy/gateway override |
 | `SLIDEGEIST_VOXTRAL_MODEL` | `voxtral-mini-latest` | Model id |
 | `SLIDEGEIST_VOXTRAL_MAX_CHUNK_S` | `3000` | Split threshold for long audio |
-| `SLIDEGEIST_TRANSCRIBER` | `voxtral` | Default backend |
+| `SLIDEGEIST_TRANSCRIBER` | `whisper` | Default backend |
 | `SLIDEGEIST_DIARIZEN_PYTHON` | – | Interpreter with DiariZen installed |
 | `SLIDEGEIST_DIARIZEN_MODEL` | `BUT-FIT/diarizen-wavlm-large-s80-md` | Diarization model |
 | `SLIDEGEIST_DIARIZEN_DEVICE` | `auto` | `cpu`, `cuda` or `auto` |
@@ -309,14 +309,20 @@ speaker turns from DiariZen independently.
 
 ## Slide description providers
 
-Slide descriptions default to **Gemma 4 via OpenRouter**. `--local` switches the
-whole run — audio *and* vision — to this machine.
+Slide descriptions default to the **local llama.cpp server**. Gemma 4 via
+OpenRouter is opt-in with `--describer openrouter`.
 
 ```bash
-slidegeist lecture.mp4                       # Voxtral audio + Gemma 4 descriptions
-slidegeist lecture.mp4 --local               # local Whisper + local llama.cpp
-slidegeist lecture.mp4 --describer local     # cloud audio, local descriptions
+slidegeist lecture.mp4                          # fully local (default)
+slidegeist lecture.mp4 --describer openrouter   # Gemma 4 descriptions
 ```
+
+⚠️ **Do not make Gemma the pipeline default.** Over a full 40-frame lecture it
+classified **36-38 of 40 genuine teaching pages as NON-SLIDE**, because the
+frames are Goodnotes screenshots carrying a macOS menu bar and a screen-sharing
+banner. The frame filter and the description share one call, so that verdict
+*deletes* the frame. Qwen3.6-27B classified all 40 correctly. Gemma is only safe
+behind a separate classification pass.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -324,12 +330,12 @@ slidegeist lecture.mp4 --describer local     # cloud audio, local descriptions
 | `SLIDEGEIST_OPENROUTER_API_KEY` | – | Override, checked first |
 | `SLIDEGEIST_OPENROUTER_URL` | `https://openrouter.ai/api` | Gateway override |
 | `SLIDEGEIST_OPENROUTER_MODEL` | `google/gemma-4-26b-a4b-it` | Vision model id |
-| `SLIDEGEIST_DESCRIBER` | `openrouter` | Default backend |
+| `SLIDEGEIST_DESCRIBER` | `local` | Default backend |
 
 As with transcription, there is **no automatic fallback**: a missing key is an
 error naming `--local`.
 
-### Why Gemma 4
+### What the measurements showed
 
 Measured on real handwritten lecture pages rather than chosen from a price table:
 
@@ -343,8 +349,15 @@ Measured on real handwritten lecture pages rather than chosen from a price table
   beat the dense `gemma-4-31b` 6-2, at roughly half the latency. Most wins were
   for *not inventing* content that was absent from the page.
 
-The same model runs locally, so `--local` is a genuine equivalent rather than a
-downgrade.
+But over a whole lecture it rejected almost every frame as non-instructional,
+which is why it is not the default. Transcription accuracy and frame
+classification are separate abilities, and only the second one is load-bearing
+for a pipeline that deletes what it rejects.
+
+On audio, Voxtral corrupted the lecture's central proper noun - "Boltzmann"
+became "Ortsmann" or "Bortzman" in 5 of 10 occurrences - where local whisper got
+all 10 right. Voxtral remains better on ordinary speech and is the only option
+with built-in diarization, so it stays available; it is not the default.
 
 ### Speaker diarization
 

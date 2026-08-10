@@ -25,20 +25,24 @@ DEFAULT_VOXTRAL_MODEL = "voxtral-mini-latest"
 # Mistral accepts up to 3 h per request. 50 min keeps a wide margin and bounds
 # the cost of a retry, while still sending a typical lecture in one piece.
 DEFAULT_VOXTRAL_MAX_CHUNK_S = 3000
-DEFAULT_TRANSCRIBER = "voxtral"
+DEFAULT_TRANSCRIBER = "whisper"
 
-# Slide description. Gemma 4 via OpenRouter is the default; the same model
-# family runs locally through llama.cpp with --local.
+# Slide description defaults to the local llama.cpp server (Qwen 3.6-27B).
+# OpenRouter/Gemma 4 remains available via --describer openrouter.
 #
-# Chosen on measurements over real lecture pages: Gemma 4 encodes a 1024px
-# slide in ~320 tokens where Qwen 3.6 needs ~5,770, and it reads handwritten
-# physics notation correctly (r_90) where cheaper tiers misread it (Gamma_90).
-# In an 8-slide A/B judged against the source images, 26B-A4B beat the dense
-# 31B 6-2, at roughly half the latency.
+# Gemma transcribes formulas well - it was the only model to render a dense
+# handwritten derivation page exactly - but it is NOT safe as the pipeline
+# default: over a full 40-frame lecture it classified 36-38 of 40 genuine
+# teaching pages as NON-SLIDE, because these are Goodnotes screenshots carrying
+# a macOS menu bar and a screen-sharing banner. Since the frame filter and the
+# description share one call, that verdict deletes the frame. Qwen classified
+# all 40 correctly.
+#
+# Use Gemma only behind a separate classification pass.
 DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api"
-DEFAULT_DESCRIBER = "openrouter"
+DEFAULT_DESCRIBER = "local"
 DEFAULT_OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it"
-DEFAULT_LOCAL_DESCRIBE_MODEL = "gemma-4-26b-a4b"
+DEFAULT_LOCAL_DESCRIBE_MODEL = "qwen27b"
 # Remote description runs several requests in flight; the local llama.cpp
 # server has one slot and is pinned to 1 in get_describe_concurrency().
 DEFAULT_DESCRIBE_CONCURRENCY = 8

@@ -355,16 +355,16 @@ Examples:
     process_parser.add_argument(
         "--transcriber",
         default=os.getenv("SLIDEGEIST_TRANSCRIBER", DEFAULT_TRANSCRIBER),
-        choices=["voxtral", "whisper"],
+        choices=["whisper", "voxtral"],
         help=f"Transcription backend (default: {DEFAULT_TRANSCRIBER})",
     )
     process_parser.add_argument(
         "--describer",
         default=os.getenv("SLIDEGEIST_DESCRIBER", DEFAULT_DESCRIBER),
-        choices=["openrouter", "local"],
+        choices=["local", "openrouter"],
         help=(
-            f"Slide description backend (default: {DEFAULT_DESCRIBER}, "
-            f"{DEFAULT_OPENROUTER_MODEL})"
+            f"Slide description backend (default: {DEFAULT_DESCRIBER}; "
+            f"openrouter uses {DEFAULT_OPENROUTER_MODEL})"
         ),
     )
     process_parser.add_argument(
@@ -372,7 +372,7 @@ Examples:
         action="store_true",
         help=(
             "Keep everything on this machine: local Whisper for audio and the "
-            "local llama.cpp server for slide descriptions"
+            "local llama.cpp server for slide descriptions (this is the default)"
         ),
     )
     process_parser.add_argument(
