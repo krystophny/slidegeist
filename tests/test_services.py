@@ -238,3 +238,39 @@ def test_llamacpp_raises_when_no_fallback_configured(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(RuntimeError, match="failed after 2 attempts"):
         services.llama_cpp_complete("prompt")
+
+
+def test_voxtral_without_speakers_requests_sentence_segments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Diarize off must not ask Mistral for speakers, nor for one segment per word."""
+    from slidegeist import transcribers
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"video")
+    sent: dict[str, Any] = {}
+
+    def fake_post(endpoint: Any, fields: list[tuple[str, str]], file_path: Path, **_: Any):
+        sent.update(fields)
+        return 200, {
+            "language": "en",
+            "segments": [{"start": 0.0, "end": 1.5, "text": "Debye shielding."}],
+        }
+
+    monkeypatch.setattr(services, "get_mistral_api_key", lambda: "key")
+    monkeypatch.setattr(services, "_post_multipart_file", fake_post)
+    monkeypatch.setattr(transcribers, "voxtral_transcribe", services.voxtral_transcribe)
+    monkeypatch.setattr(transcribers, "get_video_duration", lambda _: 1.5)
+    monkeypatch.setattr(
+        transcribers, "extract_audio_compressed", lambda _src, dst: dst.write_bytes(b"ogg")
+    )
+
+    transcriber = transcribers.build_transcriber("voxtral", None, speakers=False)
+    result, turns = transcriber.transcribe(video)
+
+    assert sent["diarize"] == "false"
+    assert sent["timestamp_granularities"] == "segment"
+    assert transcriber.provides_speakers is False
+    assert turns == []
+    assert [s["text"] for s in result["segments"]] == ["Debye shielding."]
+    assert all(not s.get("speaker") for s in result["segments"])

@@ -595,7 +595,9 @@ def process_video(
         from slidegeist.diarize import build_diarizer
         from slidegeist.transcribers import build_transcriber
 
-        active_transcriber = transcriber or build_transcriber(provider, model)
+        active_transcriber = transcriber or build_transcriber(
+            provider, model, speakers=diarize != "off"
+        )
         logger.info("Using %s for transcription", active_transcriber.name)
 
         diarizer = None

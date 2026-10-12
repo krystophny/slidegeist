@@ -89,8 +89,17 @@ class VoxtralTranscriber(BaseTranscriber):
     provider = "voxtral"
     provides_speakers = True
 
-    def __init__(self, model: str | None = None, max_chunk_s: int | None = None) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        max_chunk_s: int | None = None,
+        *,
+        speakers: bool = True,
+    ) -> None:
         self.model = model or get_voxtral_model()
+        # Without speaker labels Mistral returns word-level timing instead.
+        self.speakers = speakers
+        self.provides_speakers = speakers
         self.name = f"{self.model} (Mistral)"
         self.max_chunk_s = int(max_chunk_s or DEFAULT_VOXTRAL_MAX_CHUNK_S)
 
@@ -151,7 +160,9 @@ class VoxtralTranscriber(BaseTranscriber):
             all_segments: list[Segment] = []
             language = "unknown"
             for index, (chunk_path, offset) in enumerate(payloads):
-                payload = voxtral_transcribe(chunk_path, model=self.model, diarize=True)
+                payload = voxtral_transcribe(
+                    chunk_path, model=self.model, diarize=self.speakers
+                )
                 chunk = _normalize_voxtral_transcript(payload)
                 if chunk["language"] != "unknown":
                     language = chunk["language"]
@@ -181,12 +192,17 @@ class VoxtralTranscriber(BaseTranscriber):
         return result, turns
 
 
-def build_transcriber(provider: str = DEFAULT_TRANSCRIBER, model: str | None = None) -> BaseTranscriber:
+def build_transcriber(
+    provider: str = DEFAULT_TRANSCRIBER,
+    model: str | None = None,
+    *,
+    speakers: bool = True,
+) -> BaseTranscriber:
     """Build a transcription backend by provider name."""
     if provider in ("whisper", "whisper.cpp", "local"):
         return WhisperCppTranscriber(model)
     if provider in ("voxtral", "mistral"):
-        return VoxtralTranscriber(model)
+        return VoxtralTranscriber(model, speakers=speakers)
     raise ValueError(f"Unknown transcription provider: {provider!r}")
 
 
