@@ -9,16 +9,22 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Models sometimes set the numbered headings and the decision in Markdown
+# bold (``**0. FRAME TYPE**``); the emphasis carries no meaning.
 _FRAME_TYPE = re.compile(
-    r"^0\.\s*FRAME TYPE\s*:?\s*(?:\n[ \t]*)?(NON[-_ ]?SLIDE|SLIDE)\b",
+    r"^\*{0,2}0\.\s*FRAME TYPE\s*:?\s*\*{0,2}\s*:?\s*(?:\n[ \t]*)?\*{0,2}"
+    r"(NON[-_ ]?SLIDE|SLIDE)\b",
     re.IGNORECASE | re.MULTILINE,
 )
-_RECONSTRUCTION_SECTIONS = (
-    re.compile(r"^1\.\s*TITLE\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^2\.\s*TEXT CONTENT\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^3\.\s*FORMULAS\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^4\.\s*VISUAL ELEMENTS\b", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^5\.\s*LAYOUT\b", re.IGNORECASE | re.MULTILINE),
+_RECONSTRUCTION_SECTIONS = tuple(
+    re.compile(rf"^\*{{0,2}}{heading}\b", re.IGNORECASE | re.MULTILINE)
+    for heading in (
+        r"1\.\s*TITLE",
+        r"2\.\s*TEXT CONTENT",
+        r"3\.\s*FORMULAS",
+        r"4\.\s*VISUAL ELEMENTS",
+        r"5\.\s*LAYOUT",
+    )
 )
 _STATE_FILTER = "multimodal-instructional-content-v1"
 

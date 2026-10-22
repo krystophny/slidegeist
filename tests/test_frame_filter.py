@@ -89,6 +89,18 @@ def test_frame_type_parser_requires_an_unambiguous_structured_decision() -> None
     assert frame_type("SLIDE\n\n" + _description("NON-SLIDE")) is None
 
 
+def test_markdown_bold_headings_are_structured_descriptions() -> None:
+    bold = "\n\n".join(
+        f"**{line.partition(chr(10))[0]}**\n{line.partition(chr(10))[2]}"
+        for line in _description("SLIDE").split("\n\n")
+    )
+    assert bold.startswith("**0. FRAME TYPE**\nSLIDE")
+    assert is_slide_description(bold)
+    assert is_non_slide_description("**0. FRAME TYPE**\nNON-SLIDE")
+    assert is_non_slide_description("**0. FRAME TYPE:** **NON-SLIDE**")
+    assert not is_slide_description(bold.partition("\n\n**4. VISUAL ELEMENTS**")[0])
+
+
 def test_filter_rejects_a_description_without_frame_type(tmp_path: Path) -> None:
     slides = tmp_path / "slides"
     slides.mkdir()
