@@ -37,6 +37,12 @@ def get_llama_cpp_url() -> str:
     return os.getenv("SLIDEGEIST_LLAMACPP_URL", DEFAULT_LLAMACPP_URL).rstrip("/")
 
 
+def get_llama_cpp_headers() -> dict[str, str]:
+    """Return the bearer header for an authenticated OpenAI-compatible gateway."""
+    key = os.getenv("SLIDEGEIST_LLAMACPP_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def get_whisper_url() -> str:
     """Return the configured Whisper server base URL."""
     return os.getenv("SLIDEGEIST_WHISPER_URL", DEFAULT_WHISPER_URL).rstrip("/")
@@ -258,10 +264,12 @@ def _http_json(
     return json.loads(raw) if raw else {}
 
 
-def _http_status(url: str, timeout: float = 2.0) -> int:
+def _http_status(url: str, timeout: float = 2.0, headers: dict[str, str] | None = None) -> int:
     """Return the HTTP status code for a lightweight probe request."""
     try:
-        with request.urlopen(url, timeout=timeout) as response:
+        with request.urlopen(
+            request.Request(url, headers=headers or {}), timeout=timeout
+        ) as response:
             return int(response.status)
     except error.HTTPError as exc:
         return exc.code
@@ -271,7 +279,12 @@ def _http_status(url: str, timeout: float = 2.0) -> int:
 
 def is_llama_cpp_available(timeout: float = 2.0) -> bool:
     """Check whether the configured llama.cpp server is reachable."""
-    return _http_status(f"{get_llama_cpp_url()}/health", timeout=timeout) == 200
+    return (
+        _http_status(
+            f"{get_llama_cpp_url()}/health", timeout=timeout, headers=get_llama_cpp_headers()
+        )
+        == 200
+    )
 
 
 def is_whisper_available(timeout: float = 2.0) -> bool:
@@ -287,7 +300,9 @@ def get_llama_cpp_model(base_url: str | None = None) -> str | None:
     """Return the first advertised llama.cpp model id."""
     resolved_base_url = (base_url or get_llama_cpp_url()).rstrip("/")
     try:
-        payload = _http_json(f"{resolved_base_url}/v1/models", timeout=5.0)
+        payload = _http_json(
+            f"{resolved_base_url}/v1/models", extra_headers=get_llama_cpp_headers(), timeout=5.0
+        )
     except (OSError, ValueError, error.URLError) as exc:
         logger.debug("Could not query llama.cpp models: %s", exc)
         return None
@@ -375,7 +390,13 @@ def llama_cpp_complete(
     response = None
     for attempt in range(1, attempts + 1):
         try:
-            response = _http_json(endpoint, method="POST", payload=payload, timeout=timeout)
+            response = _http_json(
+                endpoint,
+                method="POST",
+                payload=payload,
+                extra_headers=get_llama_cpp_headers(),
+                timeout=timeout,
+            )
             break
         except (TimeoutError, OSError, error.HTTPError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
@@ -389,7 +410,11 @@ def llama_cpp_complete(
                     )
                     payload["model"] = fallback
                     response = _http_json(
-                        endpoint, method="POST", payload=payload, timeout=timeout
+                        endpoint,
+                        method="POST",
+                        payload=payload,
+                        extra_headers=get_llama_cpp_headers(),
+                        timeout=timeout,
                     )
                     break
                 raise RuntimeError(

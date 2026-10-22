@@ -274,3 +274,23 @@ def test_voxtral_without_speakers_requests_sentence_segments(
     assert turns == []
     assert [s["text"] for s in result["segments"]] == ["Debye shielding."]
     assert all(not s.get("speaker") for s in result["segments"])
+
+
+def test_llama_completion_sends_configured_gateway_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "slide.png"
+    Image.new("RGB", (64, 32), color=(17, 43, 91)).save(image)
+    captured: dict[str, Any] = {}
+
+    def fake_http_json(_: str, **kwargs: Any) -> dict[str, Any]:
+        captured["headers"] = kwargs.get("extra_headers")
+        return {"choices": [{"message": {"content": "Visible slide"}}]}
+
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_API_KEY", "gateway-key")
+    monkeypatch.setattr(services, "_http_json", fake_http_json)
+
+    assert services.llama_cpp_complete("Describe", image_path=image) == "Visible slide"
+    assert captured["headers"] == {"Authorization": "Bearer gateway-key"}

@@ -253,6 +253,8 @@ curl -I http://127.0.0.1:8427/v1/audio/transcriptions
 ```
 
 Set `SLIDEGEIST_LLAMACPP_URL` or `SLIDEGEIST_WHISPER_URL` if the services listen on different addresses.
+Set `SLIDEGEIST_LLAMACPP_API_KEY` when the multimodal endpoint is an
+OpenAI-compatible gateway that requires a bearer key.
 Set `SLIDEGEIST_LLAMACPP_MODEL` when the endpoint exposes more than one model.
 `SLIDEGEIST_LLAMACPP_MAX_IMAGE_DIMENSION` controls the longest edge of the
 multimodal request image (default: 1024). This reduces service latency without
