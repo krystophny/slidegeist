@@ -7,6 +7,7 @@ import io
 import wave
 from pathlib import Path
 from typing import Any
+from urllib import error
 
 import pytest
 from PIL import Image
@@ -274,6 +275,49 @@ def test_llamacpp_busy_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(RuntimeError, match="failed after 1 attempts"):
         services.llama_cpp_complete("prompt")
     assert sum(sleeps) == pytest.approx(30.0)
+
+
+def test_llamacpp_busy_wait_is_shared_by_attempts_and_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One frame waits at most the configured total, whatever the retries."""
+    sleeps: list[float] = []
+    models: list[str] = []
+
+    def always_busy(url, *, payload=None, **kwargs):
+        models.append(payload["model"])
+        raise _busy(429)
+
+    monkeypatch.setattr(services, "_http_json", always_busy)
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "3")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", "qwen-nomtp")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", "30")
+
+    with pytest.raises(error.HTTPError):
+        services.llama_cpp_complete("prompt")
+    assert models[-1] == "qwen-nomtp", "the fallback is still tried"
+    error_backoff = 2.0 + 4.0
+    assert sum(sleeps) == pytest.approx(30.0 + error_backoff)
+
+
+def test_llamacpp_zero_retry_after_still_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+
+    def always_busy(url, **kwargs):
+        raise _busy(503, retry_after="0")
+
+    monkeypatch.setattr(services, "_http_json", always_busy)
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "1")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", "5")
+    monkeypatch.delenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError):
+        services.llama_cpp_complete("prompt")
+    assert sleeps == [1.0] * 5
 
 
 def test_llamacpp_raises_when_no_fallback_configured(monkeypatch: pytest.MonkeyPatch) -> None:

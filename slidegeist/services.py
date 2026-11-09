@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -97,18 +98,26 @@ def get_llama_cpp_busy_wait() -> float:
 
 
 def _retry_after_seconds(exc: error.HTTPError, fallback: float) -> float:
-    raw = exc.headers.get("Retry-After") if exc.headers else None
+    raw = exc.headers.get("Retry-After") if exc.headers is not None else None
     try:
-        return max(0.0, float(raw)) if raw is not None else fallback
+        value = float(raw) if raw is not None else fallback
     except ValueError:
         return fallback
+    return value if math.isfinite(value) else fallback
 
 
-def _llama_cpp_post(endpoint: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+class _BusyBudget:
+    """Admission wait shared by all requests for one frame."""
+
+    def __init__(self, seconds: float) -> None:
+        self.remaining = seconds
+        self.delay = 2.0
+
+
+def _llama_cpp_post(
+    endpoint: str, payload: dict[str, Any], timeout: float, busy: _BusyBudget
+) -> dict[str, Any]:
     """POST to llama.cpp, waiting while the gateway reports it is full."""
-    budget = get_llama_cpp_busy_wait()
-    waited = 0.0
-    delay = 2.0
     while True:
         try:
             return _http_json(
@@ -119,13 +128,14 @@ def _llama_cpp_post(endpoint: str, payload: dict[str, Any], timeout: float) -> d
                 timeout=timeout,
             )
         except error.HTTPError as exc:
-            if exc.code not in (429, 503) or waited >= budget:
+            if exc.code not in (429, 503) or busy.remaining <= 0:
                 raise
-            pause = min(_retry_after_seconds(exc, delay), 60.0, budget - waited)
+            # At least 1 s per wait, so Retry-After: 0 cannot spin.
+            pause = min(max(_retry_after_seconds(exc, busy.delay), 1.0), 60.0, busy.remaining)
             logger.info("llama.cpp gateway busy (HTTP %d); waiting %.0fs", exc.code, pause)
             time.sleep(pause)
-            waited += pause
-            delay = min(delay * 2, 60.0)
+            busy.remaining -= pause
+            busy.delay = min(busy.delay * 2, 60.0)
 
 
 def get_llama_cpp_fallback_model() -> str | None:
@@ -430,12 +440,13 @@ def llama_cpp_complete(
     endpoint = f"{get_llama_cpp_url()}/v1/chat/completions"
     attempts = get_llama_cpp_attempts()
     fallback = get_llama_cpp_fallback_model()
+    busy = _BusyBudget(get_llama_cpp_busy_wait())
     delay = 2.0
     last_error = ""
     response = None
     for attempt in range(1, attempts + 1):
         try:
-            response = _llama_cpp_post(endpoint, payload, timeout)
+            response = _llama_cpp_post(endpoint, payload, timeout, busy)
             break
         except (TimeoutError, OSError, error.HTTPError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
@@ -448,7 +459,7 @@ def llama_cpp_complete(
                         fallback,
                     )
                     payload["model"] = fallback
-                    response = _llama_cpp_post(endpoint, payload, timeout)
+                    response = _llama_cpp_post(endpoint, payload, timeout, busy)
                     break
                 raise RuntimeError(
                     f"llama.cpp failed after {attempts} attempts: {last_error}"
