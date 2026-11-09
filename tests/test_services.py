@@ -225,6 +225,57 @@ def test_llamacpp_retries_then_uses_fallback_model(monkeypatch: pytest.MonkeyPat
     assert calls == ["qwen27b-mtp", "qwen27b-mtp", "qwen27b-nomtp"], calls
 
 
+def _busy(code: int = 503, retry_after: str | None = None) -> Exception:
+    from email.message import Message
+    from urllib import error
+
+    headers = Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return error.HTTPError("http://gateway", code, "Service Unavailable", headers, None)
+
+
+def test_llamacpp_waits_for_a_full_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway that is full for longer than the error retries still gets the frame."""
+    calls = 0
+    sleeps: list[float] = []
+
+    def busy_then_free(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls <= 6:
+            raise _busy(retry_after="5" if calls == 1 else None)
+        return {"choices": [{"message": {"content": "admitted"}}]}
+
+    monkeypatch.setattr(services, "_http_json", busy_then_free)
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "2")
+    monkeypatch.delenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", raising=False)
+
+    assert services.llama_cpp_complete("prompt") == "admitted"
+    assert sleeps[0] == 5.0, "Retry-After is honoured"
+    assert len(sleeps) == 6
+
+
+def test_llamacpp_busy_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+
+    def always_busy(url, **kwargs):
+        raise _busy(429)
+
+    monkeypatch.setattr(services, "_http_json", always_busy)
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_MODEL", "qwen")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_ATTEMPTS", "1")
+    monkeypatch.setenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", "30")
+    monkeypatch.delenv("SLIDEGEIST_LLAMACPP_FALLBACK_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="failed after 1 attempts"):
+        services.llama_cpp_complete("prompt")
+    assert sum(sleeps) == pytest.approx(30.0)
+
+
 def test_llamacpp_raises_when_no_fallback_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     from slidegeist import services
 

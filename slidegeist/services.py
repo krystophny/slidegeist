@@ -21,6 +21,7 @@ from PIL import Image, ImageOps
 
 from slidegeist.constants import (
     DEFAULT_LLAMACPP_ATTEMPTS,
+    DEFAULT_LLAMACPP_BUSY_WAIT,
     DEFAULT_LLAMACPP_URL,
     DEFAULT_MISTRAL_URL,
     DEFAULT_OPENROUTER_MODEL,
@@ -81,6 +82,50 @@ def get_llama_cpp_attempts() -> int:
     if value < 1:
         raise ValueError("SLIDEGEIST_LLAMACPP_ATTEMPTS must be at least 1")
     return value
+
+
+def get_llama_cpp_busy_wait() -> float:
+    """Return the total seconds to wait for admission at a busy gateway."""
+    raw = os.getenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", str(DEFAULT_LLAMACPP_BUSY_WAIT))
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError("SLIDEGEIST_LLAMACPP_BUSY_WAIT must be a number") from exc
+    if value < 0:
+        raise ValueError("SLIDEGEIST_LLAMACPP_BUSY_WAIT must not be negative")
+    return value
+
+
+def _retry_after_seconds(exc: error.HTTPError, fallback: float) -> float:
+    raw = exc.headers.get("Retry-After") if exc.headers else None
+    try:
+        return max(0.0, float(raw)) if raw is not None else fallback
+    except ValueError:
+        return fallback
+
+
+def _llama_cpp_post(endpoint: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    """POST to llama.cpp, waiting while the gateway reports it is full."""
+    budget = get_llama_cpp_busy_wait()
+    waited = 0.0
+    delay = 2.0
+    while True:
+        try:
+            return _http_json(
+                endpoint,
+                method="POST",
+                payload=payload,
+                extra_headers=get_llama_cpp_headers(),
+                timeout=timeout,
+            )
+        except error.HTTPError as exc:
+            if exc.code not in (429, 503) or waited >= budget:
+                raise
+            pause = min(_retry_after_seconds(exc, delay), 60.0, budget - waited)
+            logger.info("llama.cpp gateway busy (HTTP %d); waiting %.0fs", exc.code, pause)
+            time.sleep(pause)
+            waited += pause
+            delay = min(delay * 2, 60.0)
 
 
 def get_llama_cpp_fallback_model() -> str | None:
@@ -390,13 +435,7 @@ def llama_cpp_complete(
     response = None
     for attempt in range(1, attempts + 1):
         try:
-            response = _http_json(
-                endpoint,
-                method="POST",
-                payload=payload,
-                extra_headers=get_llama_cpp_headers(),
-                timeout=timeout,
-            )
+            response = _llama_cpp_post(endpoint, payload, timeout)
             break
         except (TimeoutError, OSError, error.HTTPError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
@@ -409,13 +448,7 @@ def llama_cpp_complete(
                         fallback,
                     )
                     payload["model"] = fallback
-                    response = _http_json(
-                        endpoint,
-                        method="POST",
-                        payload=payload,
-                        extra_headers=get_llama_cpp_headers(),
-                        timeout=timeout,
-                    )
+                    response = _llama_cpp_post(endpoint, payload, timeout)
                     break
                 raise RuntimeError(
                     f"llama.cpp failed after {attempts} attempts: {last_error}"
