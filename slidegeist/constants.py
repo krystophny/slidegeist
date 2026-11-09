@@ -20,6 +20,9 @@ DEFAULT_LLAMACPP_URL = "http://127.0.0.1:8081"
 # dense image prompts; retry rather than avoid, and optionally fall back to a
 # non-speculative alias via SLIDEGEIST_LLAMACPP_FALLBACK_MODEL.
 DEFAULT_LLAMACPP_ATTEMPTS = 3
+# A shared gateway answers 429/503 while its slots are full; waiting for
+# admission must not spend the error attempts above.
+DEFAULT_LLAMACPP_BUSY_WAIT = 600.0
 DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"
 
 # Remote transcription (Mistral Voxtral). Voxtral is the default provider;

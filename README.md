@@ -343,6 +343,7 @@ behind a separate classification pass.
 | `SLIDEGEIST_DESCRIBER` | `local` | Default backend |
 | `SLIDEGEIST_LLAMACPP_ATTEMPTS` | `3` | Retries before giving up on the local server |
 | `SLIDEGEIST_LLAMACPP_FALLBACK_MODEL` | – | Non-speculative alias to fall back to |
+| `SLIDEGEIST_LLAMACPP_BUSY_WAIT` | `600` | Total seconds per frame to wait while the gateway answers 429/503; each wait follows `Retry-After` within 1-60 s |
 | `SLIDEGEIST_OPENCAST_SESSION` | `~/.config/helpy/tube_session.json` | Cached Opencast session for authenticated downloads |
 
 As with transcription, there is **no automatic fallback**: a missing key is an
