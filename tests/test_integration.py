@@ -13,21 +13,18 @@ from slidegeist import cli
 from slidegeist.pipeline import process_video
 
 
-def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_video_produces_slides_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ensure process_video writes slides.json and returns paths."""
     # OCR is disabled by default now, no need to mock it
 
     def fake_detect_scenes(*_: Any, **kwargs: Any) -> list[float]:
-        kwargs["diagnostics_path"].write_text(
-            json.dumps({"timestamps": [2.0]}), encoding="utf-8"
-        )
+        kwargs["diagnostics_path"].write_text(json.dumps({"timestamps": [2.0]}), encoding="utf-8")
         return [2.0]
 
     def fake_extract_slides(
-        video_path: Path,
-        scene_timestamps: list[float],
-        output_dir: Path,
-        image_format: str
+        video_path: Path, scene_timestamps: list[float], output_dir: Path, image_format: str
     ) -> list[tuple[int, float, float, Path]]:
         slides_dir = output_dir / "slides"
         slides_dir.mkdir(parents=True, exist_ok=True)
@@ -75,9 +72,7 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
 
     monkeypatch.setattr("slidegeist.pipeline.detect_scenes", fake_detect_scenes)
     monkeypatch.setattr("slidegeist.pipeline.extract_slides", fake_extract_slides)
-    monkeypatch.setattr(
-        "slidegeist.ai_description.build_ai_describer", FakeDescriber
-    )
+    monkeypatch.setattr("slidegeist.ai_description.build_ai_describer", FakeDescriber)
 
     video_path = tmp_path / "dummy.mp4"
     video_path.write_bytes(b"fake video content")
@@ -118,14 +113,16 @@ def test_process_video_produces_slides_json(tmp_path: Path, monkeypatch: pytest.
     assert not slide_001_md.exists()
 
 
-def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_process_default_invocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Calling cli.main without subcommand should execute process pipeline."""
     output_dir = tmp_path / "cli-out"
 
     def fake_process_video(*_: Any, **__: Any) -> dict[str, Any]:
         slides_md = output_dir / "slides.md"
         output_dir.mkdir(parents=True, exist_ok=True)
-        slides_md.write_text('# Lecture Slides')
+        slides_md.write_text("# Lecture Slides")
         return {
             "output_dir": output_dir,
             "slides": [],
@@ -136,7 +133,10 @@ def test_cli_process_default_invocation(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr("slidegeist.cli.process_video", fake_process_video)
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
-    monkeypatch.setattr("slidegeist.cli.resolve_video_path", lambda input_str, output_dir, cookies_from_browser=None: Path(input_str))
+    monkeypatch.setattr(
+        "slidegeist.cli.resolve_video_path",
+        lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
+    )
     monkeypatch.setattr(sys, "argv", ["slidegeist", str(tmp_path / "input.mp4")])
 
     cli.main()
@@ -208,9 +208,7 @@ def test_cloud_flag_selects_both_remote_backends(
     )
 
 
-def test_cloud_providers_are_opt_in(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cloud_providers_are_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Cloud backends must be reachable, but only when explicitly requested."""
     calls: list[dict[str, Any]] = []
 
@@ -226,10 +224,19 @@ def test_cloud_providers_are_opt_in(
         "slidegeist.cli.resolve_video_path",
         lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
     )
-    monkeypatch.setattr(sys, "argv", [
-        "slidegeist", "process", str(tmp_path / "input.mp4"),
-        "--transcriber", "voxtral", "--describer", "openrouter",
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "slidegeist",
+            "process",
+            str(tmp_path / "input.mp4"),
+            "--transcriber",
+            "voxtral",
+            "--describer",
+            "openrouter",
+        ],
+    )
 
     cli.main()
 
@@ -246,17 +253,23 @@ def test_missing_openrouter_key_stops_before_work(
     monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("SLIDEGEIST_OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setattr(
-        "slidegeist.cli.process_video", lambda *a, **k: calls.append(k) or {}
-    )
+    monkeypatch.setattr("slidegeist.cli.process_video", lambda *a, **k: calls.append(k) or {})
     monkeypatch.setattr("slidegeist.cli.check_prerequisites", lambda: None)
     monkeypatch.setattr(
         "slidegeist.cli.resolve_video_path",
         lambda input_str, output_dir, cookies_from_browser=None: Path(input_str),
     )
-    monkeypatch.setattr(sys, "argv", [
-        "slidegeist", "process", str(tmp_path / "input.mp4"), "--describer", "openrouter",
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "slidegeist",
+            "process",
+            str(tmp_path / "input.mp4"),
+            "--describer",
+            "openrouter",
+        ],
+    )
 
     with pytest.raises(SystemExit):
         cli.main()

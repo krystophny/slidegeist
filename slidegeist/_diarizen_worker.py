@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Any
 
 SCHEMA = "slidegeist-diarization-v1"
 
@@ -26,7 +27,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Imported here so --help works without torch present.
-    from diarizen.pipelines.inference import DiariZenPipeline
+    from diarizen.pipelines.inference import DiariZenPipeline  # type: ignore[import-not-found]
 
     kwargs = {}
     if args.device and args.device != "auto":
@@ -38,7 +39,7 @@ def main() -> int:
     print(f"diarizing {args.audio}", file=sys.stderr, flush=True)
     results = pipeline(args.audio)
 
-    turns = [
+    turns: list[dict[str, Any]] = [
         {"start": float(turn.start), "end": float(turn.end), "speaker": str(speaker)}
         for turn, _, speaker in results.itertracks(yield_label=True)
     ]

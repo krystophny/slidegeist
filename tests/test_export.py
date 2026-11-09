@@ -307,9 +307,21 @@ def test_multi_speaker_slide_window_prefixes_speakers() -> None:
     from slidegeist.export import _collect_transcript_text
 
     segments = [
-        {"start": 0.0, "end": 1.0, "text": "What is the closure?", "words": [], "speaker": "SPEAKER_01"},
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "text": "What is the closure?",
+            "words": [],
+            "speaker": "SPEAKER_01",
+        },
         {"start": 1.0, "end": 2.0, "text": "Good question.", "words": [], "speaker": "SPEAKER_00"},
-        {"start": 2.0, "end": 3.0, "text": "It truncates the hierarchy.", "words": [], "speaker": "SPEAKER_00"},
+        {
+            "start": 2.0,
+            "end": 3.0,
+            "text": "It truncates the hierarchy.",
+            "words": [],
+            "speaker": "SPEAKER_00",
+        },
     ]
 
     rendered = _collect_transcript_text(segments, 0.0, 5.0)

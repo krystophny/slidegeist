@@ -17,7 +17,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TypedDict
 
@@ -48,6 +47,7 @@ class BaseDiarizer:
 
     name: str = "unknown"
     provider: str = "unknown"
+    model: str = ""
 
     def diarize(self, audio_path: Path, *, cache_path: Path | None = None) -> list[SpeakerTurn]:
         raise NotImplementedError
@@ -71,8 +71,8 @@ class DiariZenDiarizer(BaseDiarizer):
                 "SLIDEGEIST_DIARIZEN_PYTHON is not set; point it at a Python "
                 "interpreter that has DiariZen installed"
             )
-        self.model = model or os.getenv("SLIDEGEIST_DIARIZEN_MODEL", DEFAULT_DIARIZEN_MODEL)
-        self.device = device or os.getenv("SLIDEGEIST_DIARIZEN_DEVICE", "auto")
+        self.model = model or os.getenv("SLIDEGEIST_DIARIZEN_MODEL") or DEFAULT_DIARIZEN_MODEL
+        self.device = device or os.getenv("SLIDEGEIST_DIARIZEN_DEVICE") or "auto"
         raw_timeout = os.getenv("SLIDEGEIST_DIARIZEN_TIMEOUT", str(DEFAULT_DIARIZEN_TIMEOUT))
         try:
             self.timeout = float(timeout if timeout is not None else raw_timeout)
@@ -183,9 +183,7 @@ def get_diarize_mode() -> str:
     if not mode:
         return DEFAULT_DIARIZE_MODE
     if mode not in DIARIZE_MODES:
-        raise ValueError(
-            f"SLIDEGEIST_DIARIZE={mode!r} is not one of {', '.join(DIARIZE_MODES)}"
-        )
+        raise ValueError(f"SLIDEGEIST_DIARIZE={mode!r} is not one of {', '.join(DIARIZE_MODES)}")
     return mode
 
 
@@ -290,9 +288,7 @@ def assign_speakers(segments: list[Segment], turns: list[SpeakerTurn]) -> None:
                             word["end"] - word["start"]
                         )
 
-        segment_totals, hint = _overlap_by_speaker(
-            segment["start"], segment["end"], ordered, hint
-        )
+        segment_totals, hint = _overlap_by_speaker(segment["start"], segment["end"], ordered, hint)
 
         if not words:
             per_speaker = segment_totals

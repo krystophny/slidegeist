@@ -160,9 +160,7 @@ class VoxtralTranscriber(BaseTranscriber):
             all_segments: list[Segment] = []
             language = "unknown"
             for index, (chunk_path, offset) in enumerate(payloads):
-                payload = voxtral_transcribe(
-                    chunk_path, model=self.model, diarize=self.speakers
-                )
+                payload = voxtral_transcribe(chunk_path, model=self.model, diarize=self.speakers)
                 chunk = _normalize_voxtral_transcript(payload)
                 if chunk["language"] != "unknown":
                     language = chunk["language"]

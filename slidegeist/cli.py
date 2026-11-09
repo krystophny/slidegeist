@@ -8,14 +8,14 @@ from pathlib import Path
 
 from slidegeist import __version__
 from slidegeist.constants import (
+    DEFAULT_DESCRIBER,
+    DEFAULT_DIARIZE_MODE,
     DEFAULT_IMAGE_FORMAT,
     DEFAULT_MIN_SCENE_LEN,
+    DEFAULT_OPENROUTER_MODEL,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SCENE_THRESHOLD,
     DEFAULT_START_OFFSET,
-    DEFAULT_DESCRIBER,
-    DEFAULT_DIARIZE_MODE,
-    DEFAULT_OPENROUTER_MODEL,
     DEFAULT_TRANSCRIBER,
     DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_MODEL,
@@ -24,16 +24,14 @@ from slidegeist.constants import (
 from slidegeist.diarize import get_diarize_mode
 from slidegeist.download import BrowserType, download_video, get_video_filename, is_url
 from slidegeist.ffmpeg import check_ffmpeg_available
-from slidegeist.services import get_mistral_api_key, get_openrouter_api_key
 from slidegeist.pipeline import process_slides_only, process_video
+from slidegeist.services import get_mistral_api_key, get_openrouter_api_key
 
 logger = logging.getLogger(__name__)
 
 
 def resolve_video_path(
-    input_str: str,
-    output_dir: Path,
-    cookies_from_browser: BrowserType | None = None
+    input_str: str, output_dir: Path, cookies_from_browser: BrowserType | None = None
 ) -> Path:
     """Resolve input to video path, downloading if URL.
 
@@ -47,7 +45,9 @@ def resolve_video_path(
     """
     if is_url(input_str):
         logger.info(f"Detected URL input: {input_str}")
-        return download_video(input_str, output_dir=output_dir, cookies_from_browser=cookies_from_browser)
+        return download_video(
+            input_str, output_dir=output_dir, cookies_from_browser=cookies_from_browser
+        )
     return Path(input_str)
 
 
@@ -59,9 +59,7 @@ def setup_logging(verbose: bool = False) -> None:
     """
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S"
+        level=level, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
     )
 
 
@@ -149,9 +147,7 @@ def handle_process(args: argparse.Namespace) -> None:
         except ValueError as exc:
             logger.error("%s", exc)
             sys.exit(1)
-        if diarize_mode == "local" and not os.getenv(
-            "SLIDEGEIST_DIARIZEN_PYTHON", ""
-        ).strip():
+        if diarize_mode == "local" and not os.getenv("SLIDEGEIST_DIARIZEN_PYTHON", "").strip():
             logger.error(
                 "--diarize local needs SLIDEGEIST_DIARIZEN_PYTHON pointing at a "
                 "Python interpreter with DiariZen installed, e.g.\n"
@@ -166,17 +162,19 @@ def handle_process(args: argparse.Namespace) -> None:
             # Need to determine from input
             if is_url(args.input):
                 # For URLs, get video filename before downloading
-                video_filename = get_video_filename(args.input, getattr(args, 'cookies_from_browser', None))
+                video_filename = get_video_filename(
+                    args.input, getattr(args, "cookies_from_browser", None)
+                )
                 output_dir = Path.cwd() / video_filename
             else:
                 # For local files, use video filename immediately
                 output_dir = Path.cwd() / Path(args.input).stem
 
         video_path = resolve_video_path(
-            args.input, output_dir, getattr(args, 'cookies_from_browser', None)
+            args.input, output_dir, getattr(args, "cookies_from_browser", None)
         )
 
-        source_url = args.input if args.input.startswith(('http://', 'https://')) else None
+        source_url = args.input if args.input.startswith(("http://", "https://")) else None
 
         result = process_video(
             video_path=video_path,
@@ -186,10 +184,10 @@ def handle_process(args: argparse.Namespace) -> None:
             start_offset=args.start_offset,
             model=args.model,
             source_url=source_url,
-            image_format=getattr(args, 'format', DEFAULT_IMAGE_FORMAT),
-            split_slides=getattr(args, 'split', False),
-            retry_failed=getattr(args, 'retry_failed', False),
-            force_redo_ai=getattr(args, 'force_redo_ai', False),
+            image_format=getattr(args, "format", DEFAULT_IMAGE_FORMAT),
+            split_slides=getattr(args, "split", False),
+            retry_failed=getattr(args, "retry_failed", False),
+            force_redo_ai=getattr(args, "force_redo_ai", False),
             provider=provider,
             diarize=diarize_mode,
             describer_provider=describer_provider,
@@ -198,9 +196,9 @@ def handle_process(args: argparse.Namespace) -> None:
         print("\n" + "=" * 60)
         print("✓ Processing complete!")
         print("=" * 60)
-        if 'slides' in result:
+        if "slides" in result:
             print(f"  Slides:      {len(result['slides'])} images")  # type: ignore
-        if 'slides_md' in result:
+        if "slides_md" in result:
             print(f"  Markdown:    {result['slides_md']}")
         print(f"  Output dir:  {result['output_dir']}")
         print("=" * 60)
@@ -227,13 +225,15 @@ def handle_slides(args: argparse.Namespace) -> None:
         if output_dir == Path(DEFAULT_OUTPUT_DIR):
             if is_url(args.input):
                 # For URLs, get video filename before downloading
-                video_filename = get_video_filename(args.input, getattr(args, 'cookies_from_browser', None))
+                video_filename = get_video_filename(
+                    args.input, getattr(args, "cookies_from_browser", None)
+                )
                 output_dir = Path.cwd() / video_filename
             else:
                 output_dir = Path.cwd() / Path(args.input).stem
 
         video_path = resolve_video_path(
-            args.input, output_dir, getattr(args, 'cookies_from_browser', None)
+            args.input, output_dir, getattr(args, "cookies_from_browser", None)
         )
 
         result = process_slides_only(
@@ -242,7 +242,7 @@ def handle_slides(args: argparse.Namespace) -> None:
             scene_threshold=args.scene_threshold,
             min_scene_len=args.min_scene_len,
             start_offset=args.start_offset,
-            image_format=args.format
+            image_format=args.format,
         )
 
         print(f"\n✓ Extracted {len(result['slides'])} slides")
@@ -274,45 +274,33 @@ Examples:
 
   # Explicit process command (same as default)
   slidegeist process lecture.mp4
-        """
+        """,
     )
 
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
-    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
     # Create parent parsers for common arguments (for subcommands)
     verbose_parent = argparse.ArgumentParser(add_help=False)
     verbose_parent.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
+        "-v", "--verbose", action="store_true", help="Enable verbose logging"
     )
 
     common_parent = argparse.ArgumentParser(add_help=False, parents=[verbose_parent])
     common_parent.add_argument(
-        "input",
-        type=str,
-        help="Input video file path or URL (YouTube, Mediasite, etc.)"
+        "input", type=str, help="Input video file path or URL (YouTube, Mediasite, etc.)"
     )
     common_parent.add_argument(
         "--out",
         type=Path,
         default=Path(DEFAULT_OUTPUT_DIR),
-        help="Output directory (default: video filename)"
+        help="Output directory (default: video filename)",
     )
     common_parent.add_argument(
         "--cookies-from-browser",
         choices=["firefox", "safari", "chrome", "chromium", "edge", "opera", "brave"],
-        help="Browser to extract cookies from for authenticated video downloads"
+        help="Browser to extract cookies from for authenticated video downloads",
     )
 
     slides_parent = argparse.ArgumentParser(add_help=False)
@@ -321,27 +309,27 @@ Examples:
         type=float,
         default=DEFAULT_SCENE_THRESHOLD,
         metavar="NUM",
-        help=f"Scene detection sensitivity 0.0-1.0, lower=more sensitive (default: {DEFAULT_SCENE_THRESHOLD})"
+        help=f"Scene detection sensitivity 0.0-1.0, lower=more sensitive (default: {DEFAULT_SCENE_THRESHOLD})",
     )
     slides_parent.add_argument(
         "--min-scene-len",
         type=float,
         default=DEFAULT_MIN_SCENE_LEN,
         metavar="SEC",
-        help=f"Minimum scene length in seconds (default: {DEFAULT_MIN_SCENE_LEN})"
+        help=f"Minimum scene length in seconds (default: {DEFAULT_MIN_SCENE_LEN})",
     )
     slides_parent.add_argument(
         "--start-offset",
         type=float,
         default=DEFAULT_START_OFFSET,
         metavar="SEC",
-        help=f"Skip first N seconds to avoid mouse movement (default: {DEFAULT_START_OFFSET})"
+        help=f"Skip first N seconds to avoid mouse movement (default: {DEFAULT_START_OFFSET})",
     )
     slides_parent.add_argument(
         "--format",
         default=DEFAULT_IMAGE_FORMAT,
         choices=["jpg", "png"],
-        help=f"Slide image format (default: {DEFAULT_IMAGE_FORMAT})"
+        help=f"Slide image format (default: {DEFAULT_IMAGE_FORMAT})",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=False)
@@ -350,7 +338,7 @@ Examples:
     process_parser = subparsers.add_parser(
         "process",
         parents=[common_parent, slides_parent],
-        help="Process video (extract slides and transcript)"
+        help="Process video (extract slides and transcript)",
     )
     process_parser.add_argument(
         "--model",
@@ -408,37 +396,41 @@ Examples:
     process_parser.add_argument(
         "--split",
         action="store_true",
-        help="Create separate markdown files (index.md + slide_NNN.md) instead of single slides.md"
+        help="Create separate markdown files (index.md + slide_NNN.md) instead of single slides.md",
     )
     process_parser.add_argument(
         "--retry-failed",
         action="store_true",
-        help="Retry previously failed stages (transcription, OCR, AI descriptions)"
+        help="Retry previously failed stages (transcription, OCR, AI descriptions)",
     )
     process_parser.add_argument(
         "--force-redo-ai",
         action="store_true",
-        help="Regenerate ALL AI descriptions even if they already exist"
+        help="Regenerate ALL AI descriptions even if they already exist",
     )
 
     # Slides command
     subparsers.add_parser(
         "slides",
         parents=[common_parent, slides_parent],
-        help="Extract only slides (no transcription)"
+        help="Extract only slides (no transcription)",
     )
 
     # Parse arguments with special handling for default mode
     # Check if first positional arg is a subcommand or a video input
     import sys as sys_module
+
     argv = sys_module.argv[1:]
 
     # If first arg is not a known subcommand and looks like input, inject 'process'
-    if argv and argv[0] not in ['-h', '--help', '--version', '-v', '--verbose'] and \
-       argv[0] not in ['process', 'slides'] and \
-       not argv[0].startswith('-'):
+    if (
+        argv
+        and argv[0] not in ["-h", "--help", "--version", "-v", "--verbose"]
+        and argv[0] not in ["process", "slides"]
+        and not argv[0].startswith("-")
+    ):
         # First positional arg is likely video input, default to process mode
-        argv = ['process'] + argv
+        argv = ["process"] + argv
         args = parser.parse_args(argv)
     else:
         args = parser.parse_args()

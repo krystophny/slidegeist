@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class FFmpegError(Exception):
     """Raised when FFmpeg operations fail."""
+
     pass
 
 
@@ -46,10 +47,13 @@ def get_video_duration(video_path: Path) -> float:
 
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(video_path)
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(video_path),
     ]
 
     try:
@@ -91,10 +95,7 @@ def detect_scenes(
     from slidegeist.transition_detector import analyze_slide_transitions
 
     analysis = analyze_slide_transitions(
-        video_path,
-        threshold=threshold,
-        min_scene_len=min_scene_len,
-        start_offset=start_offset
+        video_path, threshold=threshold, min_scene_len=min_scene_len, start_offset=start_offset
     )
     if diagnostics_path is not None:
         diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,13 +134,19 @@ def extract_audio_compressed(
 
     cmd = [
         "ffmpeg",
-        "-i", str(video_path),
+        "-i",
+        str(video_path),
         "-vn",
-        "-c:a", "libopus",
-        "-b:a", bitrate,
-        "-ac", "1",
-        "-ar", str(sample_rate),
-        "-application", "voip",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        bitrate,
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-application",
+        "voip",
         "-y",
         str(output_path),
     ]
@@ -153,11 +160,7 @@ def extract_audio_compressed(
         raise FFmpegError(f"Compressed audio extraction produced no output: {output_path}")
 
 
-def extract_audio(
-    video_path: Path,
-    output_path: Path,
-    sample_rate: int = 16000
-) -> None:
+def extract_audio(video_path: Path, output_path: Path, sample_rate: int = 16000) -> None:
     """Extract audio from video file as 16kHz mono WAV for whisper.cpp.
 
     Args:
@@ -176,13 +179,17 @@ def extract_audio(
 
     cmd = [
         "ffmpeg",
-        "-i", str(video_path),
+        "-i",
+        str(video_path),
         "-vn",  # No video
-        "-acodec", "pcm_s16le",  # 16-bit PCM
-        "-ar", str(sample_rate),  # Resample to 16kHz
-        "-ac", "1",  # Mono
+        "-acodec",
+        "pcm_s16le",  # 16-bit PCM
+        "-ar",
+        str(sample_rate),  # Resample to 16kHz
+        "-ac",
+        "1",  # Mono
         "-y",  # Overwrite output file
-        str(output_path)
+        str(output_path),
     ]
 
     try:
@@ -193,10 +200,7 @@ def extract_audio(
 
 
 def extract_frame(
-    video_path: Path,
-    timestamp: float,
-    output_path: Path,
-    image_format: str = "jpg"
+    video_path: Path, timestamp: float, output_path: Path, image_format: str = "jpg"
 ) -> None:
     """Extract a single frame from a video at the specified timestamp.
 
@@ -222,13 +226,17 @@ def extract_frame(
 
     cmd = [
         "ffmpeg",
-        "-ss", str(timestamp),  # Seek to timestamp
-        "-i", str(video_path),
-        "-frames:v", "1",  # Extract one frame
+        "-ss",
+        str(timestamp),  # Seek to timestamp
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",  # Extract one frame
         *quality_args,
-        "-strict", "unofficial",  # Allow non-standard YUV colorspace
+        "-strict",
+        "unofficial",  # Allow non-standard YUV colorspace
         "-y",  # Overwrite output file
-        str(output_path)
+        str(output_path),
     ]
 
     try:

@@ -65,7 +65,9 @@ def test_manual_ocr_pipeline(tmp_path: Path) -> None:
     result = pipeline.process(
         image_path=image_path,
         transcript_full_text="Today we cover convolutional networks",
-        transcript_segments=[{"start": 0.0, "end": 5.0, "text": "Today we cover convolutional networks"}],
+        transcript_segments=[
+            {"start": 0.0, "end": 5.0, "text": "Today we cover convolutional networks"}
+        ],
     )
 
     assert "Deep" in result["final_text"]

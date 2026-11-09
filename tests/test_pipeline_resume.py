@@ -82,8 +82,7 @@ def test_filter_plan_with_unexported_rejected_section_remains_resumable(
     rejected = tmp_path / "slides" / "slide_002.jpg.non-slide"
     rejected.write_bytes(b"known rejected frame")
     (tmp_path / "slides.md").write_text(
-        _section(1, _complete_description("Accepted"))
-        + _section(2, "0. FRAME TYPE\nNON-SLIDE"),
+        _section(1, _complete_description("Accepted")) + _section(2, "0. FRAME TYPE\nNON-SLIDE"),
         encoding="utf-8",
     )
 

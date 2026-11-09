@@ -98,7 +98,7 @@ def _edge_change(previous: np.ndarray, current: np.ndarray) -> float:
     if union == 0:
         return 0.0
     changed = np.count_nonzero((prev_edges > 0) ^ (curr_edges > 0))
-    return float(changed / union)
+    return float(changed) / float(union)
 
 
 def _phash(gray: np.ndarray) -> np.ndarray:

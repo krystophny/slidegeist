@@ -1,6 +1,5 @@
 """Tests for FFmpeg wrapper functionality."""
 
-
 from slidegeist.ffmpeg import check_ffmpeg_available
 from slidegeist.slides import format_slide_filename, format_timestamp_hhmmss
 

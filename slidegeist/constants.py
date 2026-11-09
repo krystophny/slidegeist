@@ -10,8 +10,8 @@ DEFAULT_START_OFFSET = 3.0  # Skip first N seconds to avoid mouse movement durin
 # Legacy experimental Opencast detector parameters. The default detector does
 # not use any of these cadence priors.
 DEFAULT_SEGMENTS_PER_HOUR = 30  # Target segments per hour (matches typical presentation pace)
-DEFAULT_MAX_ERROR = 0.25     # Maximum error tolerance (25%, Opencast default)
-DEFAULT_MAX_CYCLES = 3       # Maximum optimization iterations (Opencast default)
+DEFAULT_MAX_ERROR = 0.25  # Maximum error tolerance (25%, Opencast default)
+DEFAULT_MAX_CYCLES = 3  # Maximum optimization iterations (Opencast default)
 
 # Whisper transcription
 DEFAULT_WHISPER_MODEL = "large-v3-turbo"

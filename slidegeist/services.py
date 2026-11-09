@@ -630,8 +630,6 @@ def voxtral_transcribe(
             )
         except (TimeoutError, OSError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
-            status = None
-            payload = {}
         else:
             if status < 400:
                 return payload

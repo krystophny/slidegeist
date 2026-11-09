@@ -41,7 +41,9 @@ def test_translate_url_tugraz_portal_http() -> None:
 
 def test_translate_url_tugraz_paella_unchanged() -> None:
     """Test TU Graz paella URL passes through unchanged."""
-    paella_url = "https://tube.tugraz.at/paella/ui/watch.html?id=ab28ec60-8cbe-4f1a-9b96-a95add56c612"
+    paella_url = (
+        "https://tube.tugraz.at/paella/ui/watch.html?id=ab28ec60-8cbe-4f1a-9b96-a95add56c612"
+    )
     assert translate_url(paella_url) == paella_url
 
 
