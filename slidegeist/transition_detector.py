@@ -185,7 +185,11 @@ def _score_evidence(
         structural_votes = sum(
             ratios[name] >= 1.0 for name in ("ssim_loss", "edge_change", "phash")
         )
-        global_support = ratios["coverage"] >= 1.0 or ratios["histogram"] >= 1.0
+        # Sparse pages in screen-share margins change few tiles; unanimous
+        # structural evidence then stands in for global support.
+        global_support = (
+            ratios["coverage"] >= 1.0 or ratios["histogram"] >= 1.0 or structural_votes == 3
+        )
         structural_support = structural_votes >= 2 or (
             structural_votes >= 1 and score >= 1.25 + threshold_bias
         )
