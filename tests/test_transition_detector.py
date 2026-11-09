@@ -6,7 +6,11 @@ from pathlib import Path
 from time import monotonic
 
 from slidegeist.transition_detector import _sampled_frames, analyze_slide_transitions
-from tests.synthetic_video import make_slide_video, make_vfr_slide_video
+from tests.synthetic_video import (
+    make_slide_video,
+    make_sparse_page_video,
+    make_vfr_slide_video,
+)
 
 
 def _match(detected: list[float], expected: list[float], tolerance: float = 0.65) -> None:
@@ -123,3 +127,14 @@ def test_variable_frame_rate_uses_source_presentation_times(tmp_path: Path) -> N
     analysis = analyze_slide_transitions(video, start_offset=0.0, sample_interval=0.5)
 
     _match(analysis.timestamps, oracle, tolerance=0.08)
+
+
+def test_sparse_page_change_in_black_margins_is_detected(tmp_path: Path) -> None:
+    """Thin-line white pages change few tiles; structural agreement must still count."""
+    oracle = [3.0, 7.0]
+    video = tmp_path / "sparse-pages.avi"
+    make_sparse_page_video(video, oracle)
+
+    analysis = analyze_slide_transitions(video, start_offset=0.0)
+
+    _match(analysis.timestamps, oracle)

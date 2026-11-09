@@ -156,3 +156,48 @@ def make_vfr_slide_video(path: Path, transitions: list[float]) -> None:
         ],
         check=True,
     )
+
+
+def make_sparse_page_video(path: Path, transitions: list[float], duration: float = 12.0) -> None:
+    """Write a screen-shared tablet view: white pages with thin marks in black margins."""
+    width, height, fps = 640, 360, 10
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (width, height))
+    if not writer.isOpened():
+        raise RuntimeError("OpenCV could not create synthetic AVI fixture")
+    try:
+        for frame_number in range(round(duration * fps)):
+            page = sum(frame_number / fps >= transition for transition in transitions)
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            frame[20:340, 70:570] = 255
+            cv2.putText(
+                frame,
+                ["Tunnelling alone", "Actual cross sections", "S factor"][page % 3],
+                (100, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (40, 40, 40),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.line(frame, (110, 110), (110, 300), (60, 60, 60), 1)
+            cv2.line(frame, (110, 300), (330, 300), (60, 60, 60), 1)
+            xs = np.arange(112, 330)
+            for curve in range(2):
+                width_scale = 25.0 + 60.0 * ((page + curve) % 3)
+                ys = 290 - (150 * np.tanh((xs - 112) / width_scale)).astype(np.int32)
+                points = np.stack([xs, ys - 20 * curve], axis=1)
+                cv2.polylines(frame, [points], False, (160 - 100 * curve, 90, 30), 1)
+            for line in range(4):
+                cv2.putText(
+                    frame,
+                    f"D-T  {page + 1}.{line}{(page * 7 + line) % 10} MeV",
+                    (380, 130 + 32 * line + 6 * page),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (50, 50, 50),
+                    1,
+                    cv2.LINE_AA,
+                )
+            writer.write(frame)
+    finally:
+        writer.release()
