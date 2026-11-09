@@ -155,10 +155,10 @@ def test_labeled_video_threshold_sweep(video: LabeledVideo):
     """
     video_path = download_video(video)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Threshold Sweep: {video.name}")
     print(f"Expected slides: {video.slide_count}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     thresholds = [0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.10]
     results = []
@@ -170,20 +170,16 @@ def test_labeled_video_threshold_sweep(video: LabeledVideo):
         status = "✓" if detected >= video.slide_count else "✗"
         print(f"  {threshold:.3f}: {detected:3d} slides {status}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
 
     # Find best threshold (closest to expected without under-detecting)
     valid_results = [(t, d) for t, d in results if d >= video.slide_count]
 
     if valid_results:
-        best_threshold, best_count = min(
-            valid_results, key=lambda x: abs(x[1] - video.slide_count)
-        )
+        best_threshold, best_count = min(valid_results, key=lambda x: abs(x[1] - video.slide_count))
         print(f"Best threshold: {best_threshold:.3f} ({best_count} slides)")
     else:
         print("WARNING: No threshold detected minimum required slides!")
 
     # At least one threshold should work
-    assert len(valid_results) > 0, (
-        f"No threshold detected at least {video.slide_count} slides"
-    )
+    assert len(valid_results) > 0, f"No threshold detected at least {video.slide_count} slides"

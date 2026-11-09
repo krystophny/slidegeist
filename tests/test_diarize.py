@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -165,6 +164,15 @@ def test_worker_argv_targets_configured_interpreter(monkeypatch, tmp_path) -> No
     assert command[0] == "/usr/bin/python3.11"
     assert "-m" not in command, "the worker runs as a file; the venv has no slidegeist"
     assert command[2].endswith("_diarizen_worker.py")
+
+
+def test_empty_model_and_device_variables_use_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("SLIDEGEIST_DIARIZEN_MODEL", "")
+    monkeypatch.setenv("SLIDEGEIST_DIARIZEN_DEVICE", "")
+    diarizer = DiariZenDiarizer(interpreter="/usr/bin/python3.11")
+
+    assert diarizer.model == diarize.DEFAULT_DIARIZEN_MODEL
+    assert diarizer.device == "auto"
 
 
 def test_worker_rejects_unknown_schema(monkeypatch, tmp_path) -> None:

@@ -6,8 +6,8 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -660,9 +660,7 @@ def run_ai_descriptions(
         if (
             not force_redo
             and slide_id in existing_data
-            and is_complete_frame_description(
-                existing_data[slide_id].get("ai_description", "")
-            )
+            and is_complete_frame_description(existing_data[slide_id].get("ai_description", ""))
         ):
             descriptions[slide_id] = existing_data[slide_id]["ai_description"]
             logger.debug(f"Skipping {slide_id} (already has AI description)")

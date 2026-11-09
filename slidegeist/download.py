@@ -14,9 +14,7 @@ import yt_dlp  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
-BrowserType = Literal[
-    "firefox", "safari", "chrome", "chromium", "edge", "opera", "brave"
-]
+BrowserType = Literal["firefox", "safari", "chrome", "chromium", "edge", "opera", "brave"]
 
 
 def translate_url(url: str) -> str:
@@ -122,10 +120,12 @@ def resolve_opencast_track(url: str) -> tuple[str, str | None] | None:
     ):
         candidates.extend(_tracks(_get_json(endpoint)))
         progressive = [
-            t for t in candidates
+            t
+            for t in candidates
             if str(t.get("url", "")).endswith(".mp4") and "/static/" in str(t.get("url", ""))
         ]
         if progressive:
+
             def _size(track: dict[str, Any]) -> int:
                 try:
                     return int(track.get("size") or 0)
@@ -138,9 +138,7 @@ def resolve_opencast_track(url: str) -> tuple[str, str | None] | None:
 
     streaming = [t for t in candidates if ".m3u8" in str(t.get("url", ""))]
     if streaming:
-        logger.info(
-            "Opencast event %s has no progressive MP4; falling back to HLS", event_id[:8]
-        )
+        logger.info("Opencast event %s has no progressive MP4; falling back to HLS", event_id[:8])
         return str(streaming[0]["url"]), cookie
     return None
 
@@ -172,13 +170,14 @@ def download_opencast(url: str, output_dir: Path) -> Path | None:
     if completed.returncode != 0 or not destination.exists() or destination.stat().st_size == 0:
         destination.unlink(missing_ok=True)
         raise ValueError(
-            f"Opencast download failed for {event_id}: "
-            f"{(completed.stderr or '').strip()[-400:]}"
+            f"Opencast download failed for {event_id}: {(completed.stderr or '').strip()[-400:]}"
         )
     return destination
 
 
-def check_existing_video(url: str, output_dir: Path, cookies_from_browser: BrowserType | None = None) -> Path | None:
+def check_existing_video(
+    url: str, output_dir: Path, cookies_from_browser: BrowserType | None = None
+) -> Path | None:
     """Check if video from URL already exists in output directory.
 
     Args:
@@ -229,9 +228,7 @@ def check_existing_video(url: str, output_dir: Path, cookies_from_browser: Brows
 
 
 def download_video(
-    url: str,
-    output_dir: Path | None = None,
-    cookies_from_browser: BrowserType | None = None
+    url: str, output_dir: Path | None = None, cookies_from_browser: BrowserType | None = None
 ) -> Path:
     """Download video from URL using yt-dlp, or reuse if already downloaded.
 

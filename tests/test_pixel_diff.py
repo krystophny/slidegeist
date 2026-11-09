@@ -11,7 +11,9 @@ import pytest
 from slidegeist.pixel_diff_detector import detect_slides_pixel_diff
 
 
-def test_detect_slides_pixel_diff_fallbacks_to_default_fps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_slides_pixel_diff_fallbacks_to_default_fps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Videos reporting 0 FPS should trigger a safe fallback."""
     video_path = tmp_path / "input.mp4"
     video_path.write_bytes(b"fake")

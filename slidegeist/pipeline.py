@@ -5,6 +5,7 @@ import logging
 import math
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from slidegeist.constants import (
     DEFAULT_DESCRIBER,
@@ -17,13 +18,16 @@ from slidegeist.constants import (
     DEFAULT_TRANSCRIBER,
     DEFAULT_WHISPER_MODEL,
 )
-
-TRANSCRIPT_SCHEMA = "slidegeist-transcript-v2"
 from slidegeist.export import export_slides_json
 from slidegeist.ffmpeg import FFmpegError, detect_scenes, get_video_duration
 from slidegeist.ocr import OcrPipeline
 from slidegeist.slides import extract_slides
-from slidegeist.transcribe import Segment, Word, transcribe_video
+from slidegeist.transcribe import Segment, Word
+
+if TYPE_CHECKING:
+    from slidegeist.transcribers import BaseTranscriber
+
+TRANSCRIPT_SCHEMA = "slidegeist-transcript-v2"
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +455,7 @@ def process_video(
     retry_failed: bool = False,
     force_redo_ai: bool = False,
     provider: str = DEFAULT_TRANSCRIBER,
-    transcriber: object | None = None,
+    transcriber: "BaseTranscriber | None" = None,
     diarize: str = DEFAULT_DIARIZE_MODE,
     describer_provider: str = DEFAULT_DESCRIBER,
 ) -> dict[str, Path | list[Path]]:

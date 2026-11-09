@@ -9,9 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def detect_scenes_ffmpeg(
-    video_path: Path,
-    threshold: float = 0.025,
-    start_offset: float = 3.0
+    video_path: Path, threshold: float = 0.025, start_offset: float = 3.0
 ) -> list[float]:
     """Detect scene changes using FFmpeg's scene filter.
 
@@ -34,30 +32,27 @@ def detect_scenes_ffmpeg(
     # showinfo outputs frame metadata including pts_time timestamps
     cmd = [
         "ffmpeg",
-        "-i", str(video_path),
-        "-filter:v", f"select='gt(scene,{threshold})',showinfo",
-        "-f", "null",
-        "-"
+        "-i",
+        str(video_path),
+        "-filter:v",
+        f"select='gt(scene,{threshold})',showinfo",
+        "-f",
+        "null",
+        "-",
     ]
 
     logger.info(f"Running FFmpeg scene detection with threshold={threshold:.4f}")
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=True
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=True)
 
         # Parse output to extract timestamps
         # FFmpeg showinfo filter outputs: pts_time:15.16
         timestamps = []
         for line in result.stderr.splitlines():
-            if 'pts_time:' in line:
+            if "pts_time:" in line:
                 # Extract pts_time value using regex
-                match = re.search(r'pts_time:([\d.]+)', line)
+                match = re.search(r"pts_time:([\d.]+)", line)
                 if match:
                     try:
                         timestamp = float(match.group(1))
@@ -76,9 +71,7 @@ def detect_scenes_ffmpeg(
 
 
 def merge_short_segments(
-    timestamps: list[float],
-    min_duration: float,
-    video_duration: float
+    timestamps: list[float], min_duration: float, video_duration: float
 ) -> list[float]:
     """Merge segments shorter than minimum duration.
 
@@ -99,7 +92,7 @@ def merge_short_segments(
     # Convert timestamps to segments (start, end pairs)
     segments = []
     for i in range(len(timestamps)):
-        start = timestamps[i-1] if i > 0 else 0.0
+        start = timestamps[i - 1] if i > 0 else 0.0
         end = timestamps[i]
         segments.append((start, end))
     # Add final segment
@@ -138,7 +131,7 @@ def detect_scenes_opencast(
     max_cycles: int = 3,
     initial_threshold: float = 0.025,
     stability_threshold: float = 60.0,
-    start_offset: float = 3.0
+    start_offset: float = 3.0,
 ) -> tuple[list[float], float]:
     """Detect scenes using Opencast's iterative optimization approach.
 
@@ -175,16 +168,14 @@ def detect_scenes_opencast(
         timestamps = detect_scenes_ffmpeg(video_path, threshold, start_offset)
 
         # Merge short segments
-        timestamps = merge_short_segments(
-            timestamps,
-            stability_threshold,
-            video_duration
-        )
+        timestamps = merge_short_segments(timestamps, stability_threshold, video_duration)
 
         # Count segments: N timestamps (cut points) = N+1 segments
         # (segment0-t0, t0-t1, t1-t2, ..., tN-end)
         detected_segments = len(timestamps) + 1 if timestamps else 1
-        error = abs(detected_segments - target_segments) / target_segments if target_segments > 0 else 0
+        error = (
+            abs(detected_segments - target_segments) / target_segments if target_segments > 0 else 0
+        )
 
         logger.info(
             f"Cycle {cycle + 1}/{max_cycles}: threshold={threshold:.4f}, "

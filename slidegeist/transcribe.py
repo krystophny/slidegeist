@@ -7,11 +7,14 @@ import math
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from slidegeist.constants import DEFAULT_WHISPER_MODEL
 from slidegeist.ffmpeg import extract_audio, get_video_duration
 from slidegeist.services import whisper_transcribe
+
+if TYPE_CHECKING:
+    from slidegeist.diarize import BaseDiarizer
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +149,12 @@ def _rebase_word_timing(segments: list[Segment]) -> int:
 
         scale = seg_span / span
         for word in words:
-            word["start"] = min(seg_end, max(seg_start, seg_start + (word["start"] - span_start) * scale))
-            word["end"] = min(seg_end, max(seg_start, seg_start + (word["end"] - span_start) * scale))
+            word["start"] = min(
+                seg_end, max(seg_start, seg_start + (word["start"] - span_start) * scale)
+            )
+            word["end"] = min(
+                seg_end, max(seg_start, seg_start + (word["end"] - span_start) * scale)
+            )
         rebased += 1
 
     return rebased
@@ -313,7 +320,7 @@ def transcribe_video(
     video_path: Path,
     model_size: str = DEFAULT_WHISPER_MODEL,
     *,
-    diarizer: object | None = None,
+    diarizer: BaseDiarizer | None = None,
     diarization_cache: Path | None = None,
     speaker_turns: list | None = None,
 ) -> TranscriptResult:

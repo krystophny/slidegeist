@@ -89,11 +89,7 @@ def _filtered_metadata(
     filtered: list[tuple[int, float, float, Path]] = []
     for position, (index, start, _end, image_path) in enumerate(accepted):
         filtered_start = 0.0 if position == 0 else start
-        filtered_end = (
-            accepted[position + 1][1]
-            if position + 1 < len(accepted)
-            else video_end
-        )
+        filtered_end = accepted[position + 1][1] if position + 1 < len(accepted) else video_end
         filtered.append((index, filtered_start, filtered_end, image_path))
     return filtered
 
@@ -158,17 +154,11 @@ def filter_non_slide_states(
             raise RuntimeError("state-filter diagnostic has no rejection plan")
         raw_timestamps = payload.get("raw_timestamps")
         video_end = payload.get("state_filter_video_end")
-        if not isinstance(raw_timestamps, list) or not isinstance(
-            video_end, (int, float)
-        ):
+        if not isinstance(raw_timestamps, list) or not isinstance(video_end, (int, float)):
             raise RuntimeError("state-filter diagnostic is incomplete")
-        already_renamed = _complete_rejected_renames(
-            slide_metadata, existing_rejections
-        )
+        already_renamed = _complete_rejected_renames(slide_metadata, existing_rejections)
         if len(slide_metadata) + already_renamed != len(raw_timestamps) + 1:
-            raise RuntimeError(
-                "cannot recover filtering: detector and frame counts disagree"
-            )
+            raise RuntimeError("cannot recover filtering: detector and frame counts disagree")
         rejected_ids = {str(state["slide_id"]) for state in existing_rejections}
         return _filtered_metadata(slide_metadata, rejected_ids, float(video_end))
 
@@ -179,8 +169,7 @@ def filter_non_slide_states(
     ]
     if incomplete:
         raise RuntimeError(
-            "multimodal descriptions are unclassified or incomplete: "
-            + ", ".join(incomplete)
+            "multimodal descriptions are unclassified or incomplete: " + ", ".join(incomplete)
         )
 
     rejected = [
@@ -192,9 +181,7 @@ def filter_non_slide_states(
     if not isinstance(current_timestamps, list):
         raise RuntimeError("transition diagnostics have no timestamp list")
     if len(current_timestamps) != len(slide_metadata) - 1:
-        raise RuntimeError(
-            "cannot filter frames: transition and extracted-state counts disagree"
-        )
+        raise RuntimeError("cannot filter frames: transition and extracted-state counts disagree")
 
     video_end = slide_metadata[-1][2]
     rejected_ids = {item[3].stem for item in rejected}

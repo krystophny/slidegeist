@@ -38,10 +38,7 @@ def format_slide_filename(index: int, total_slides: int) -> str:
 
 
 def extract_slides(
-    video_path: Path,
-    scene_timestamps: list[float],
-    output_dir: Path,
-    image_format: str = "jpg"
+    video_path: Path, scene_timestamps: list[float], output_dir: Path, image_format: str = "jpg"
 ) -> list[tuple[int, float, float, Path]]:
     """Extract slides from video at scene change timestamps.
 
@@ -89,7 +86,9 @@ def extract_slides(
 
         # Validate segment duration
         if segment_duration < 0.01:  # 10ms minimum
-            logger.warning(f"Skipping very short segment at {start_time:.2f}s (duration: {segment_duration*1000:.1f}ms)")
+            logger.warning(
+                f"Skipping very short segment at {start_time:.2f}s (duration: {segment_duration * 1000:.1f}ms)"
+            )
             continue
 
         # Extract at 80% through the segment
