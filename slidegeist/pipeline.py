@@ -21,6 +21,7 @@ from slidegeist.constants import (
 from slidegeist.export import export_slides_json
 from slidegeist.ffmpeg import FFmpegError, detect_scenes, get_video_duration
 from slidegeist.ocr import OcrPipeline
+from slidegeist.services import get_llama_cpp_url
 from slidegeist.slides import extract_slides
 from slidegeist.transcribe import Segment, Word
 
@@ -786,7 +787,7 @@ def process_video(
 
         except Exception as exc:
             error_msg = f"AI description failed: {exc}\n\nTo fix:\n"
-            error_msg += "1. Start llama.cpp on 127.0.0.1:8081\n"
+            error_msg += f"1. Check that the llama.cpp server at {get_llama_cpp_url()} is up and not overloaded\n"
             error_msg += "2. Verify POST /v1/completions works for the configured model\n"
             logger.error("=" * 60)
             logger.error("AI DESCRIPTION FAILED")
