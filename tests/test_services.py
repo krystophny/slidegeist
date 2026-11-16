@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import io
+import shutil
+import subprocess
 import wave
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,12 @@ import pytest
 from PIL import Image
 
 from slidegeist import services
-from slidegeist.transcribe import _chunk_start_offsets, _normalize_transcript, transcribe_video
+from slidegeist.transcribe import (
+    _chunk_start_offsets,
+    _normalize_transcript,
+    _split_audio_chunks,
+    transcribe_video,
+)
 
 
 def test_llama_completion_sends_image_and_configured_model(
@@ -432,3 +439,26 @@ def test_voxtral_request_length_is_configurable(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setenv("SLIDEGEIST_VOXTRAL_MAX_CHUNK_S", "600")
     assert transcribers.build_transcriber("voxtral", None).max_chunk_s == 600
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+def test_copied_opus_chunks_start_where_the_previous_one_ended(tmp_path: Path) -> None:
+    """Four chunks of a 35 s recording start at 0, 10, 20 and 30 s."""
+    audio = tmp_path / "lecture.ogg"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=35",
+            "-c:a",
+            "libopus",
+            str(audio),
+        ],
+        check=True,
+    )
+    chunks = _split_audio_chunks(audio, tmp_path / "chunks", chunk_duration=10, suffix="ogg")
+    assert _chunk_start_offsets(chunks) == pytest.approx([0.0, 10.0, 20.0, 30.0], abs=0.1)
