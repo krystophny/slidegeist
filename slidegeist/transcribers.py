@@ -14,12 +14,15 @@ from tempfile import TemporaryDirectory
 
 from slidegeist.constants import (
     DEFAULT_TRANSCRIBER,
-    DEFAULT_VOXTRAL_MAX_CHUNK_S,
     DEFAULT_WHISPER_MODEL,
 )
 from slidegeist.diarize import BaseDiarizer, SpeakerTurn, assign_speakers, canonicalize_speaker_ids
 from slidegeist.ffmpeg import extract_audio_compressed, get_video_duration
-from slidegeist.services import get_voxtral_model, voxtral_transcribe
+from slidegeist.services import (
+    get_voxtral_max_chunk_s,
+    get_voxtral_model,
+    voxtral_transcribe,
+)
 from slidegeist.transcribe import (
     CHUNK_DURATION_S,
     Segment,
@@ -101,7 +104,7 @@ class VoxtralTranscriber(BaseTranscriber):
         self.speakers = speakers
         self.provides_speakers = speakers
         self.name = f"{self.model} (Mistral)"
-        self.max_chunk_s = int(max_chunk_s or DEFAULT_VOXTRAL_MAX_CHUNK_S)
+        self.max_chunk_s = int(max_chunk_s or get_voxtral_max_chunk_s())
 
     def transcribe(
         self,

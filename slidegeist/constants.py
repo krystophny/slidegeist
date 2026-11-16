@@ -32,6 +32,9 @@ DEFAULT_VOXTRAL_MODEL = "voxtral-mini-latest"
 # Mistral accepts up to 3 h per request. 50 min keeps a wide margin and bounds
 # the cost of a retry, while still sending a typical lecture in one piece.
 DEFAULT_VOXTRAL_MAX_CHUNK_S = 3000
+# Mistral answers 429 backend_out_of_capacity in bursts; waiting for capacity
+# must not spend the error attempts.
+DEFAULT_VOXTRAL_BUSY_WAIT = 1800.0
 DEFAULT_TRANSCRIBER = "whisper"
 
 # Slide description defaults to the local llama.cpp server (Qwen 3.6-27B).
