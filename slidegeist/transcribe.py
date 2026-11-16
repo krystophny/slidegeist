@@ -267,6 +267,9 @@ def _split_audio_chunks(
     chunk_dir.mkdir(parents=True, exist_ok=True)
     pattern = str(chunk_dir / f"chunk_%04d.{suffix}")
     cmd = ["ffmpeg", "-i", str(audio_path), "-f", "segment", "-segment_time", str(chunk_duration)]
+    # Without the reset, copied chunks keep source timestamps and ffprobe reports
+    # their end time as duration, which shifts every offset after the second chunk.
+    cmd += ["-reset_timestamps", "1"]
     if suffix == "wav":
         cmd += ["-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le"]
     else:
