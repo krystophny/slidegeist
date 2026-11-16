@@ -389,3 +389,46 @@ def test_llama_completion_sends_configured_gateway_key(
 
     assert services.llama_cpp_complete("Describe", image_path=image) == "Visible slide"
     assert captured["headers"] == {"Authorization": "Bearer gateway-key"}
+
+
+def test_voxtral_waits_for_capacity_without_spending_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Five out-of-capacity answers are waited out, not counted as failures."""
+    audio = tmp_path / "lecture.ogg"
+    audio.write_bytes(b"ogg")
+    answers = [(429, {"type": "backend_out_of_capacity"})] * 5 + [(200, {"text": "ok"})]
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(services, "get_mistral_api_key", lambda: "key")
+    monkeypatch.setattr(services, "_post_multipart_file", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.delenv("SLIDEGEIST_VOXTRAL_BUSY_WAIT", raising=False)
+
+    assert services.voxtral_transcribe(audio, model="voxtral-mini-latest") == {"text": "ok"}
+    assert sleeps == [2.0, 4.0, 8.0, 16.0, 32.0]
+
+
+def test_voxtral_capacity_wait_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audio = tmp_path / "lecture.ogg"
+    audio.write_bytes(b"ogg")
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(services, "get_mistral_api_key", lambda: "key")
+    monkeypatch.setattr(
+        services, "_post_multipart_file", lambda *a, **k: (429, {"type": "backend_out_of_capacity"})
+    )
+    monkeypatch.setattr(services.time, "sleep", sleeps.append)
+    monkeypatch.setenv("SLIDEGEIST_VOXTRAL_BUSY_WAIT", "10")
+
+    with pytest.raises(RuntimeError, match="failed after 3 attempts"):
+        services.voxtral_transcribe(audio, model="voxtral-mini-latest")
+    capacity_wait, error_backoff = 2.0 + 4.0 + 4.0, 2.0 + 8.0
+    assert sum(sleeps) == pytest.approx(capacity_wait + error_backoff)
+
+
+def test_voxtral_request_length_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from slidegeist import transcribers
+
+    monkeypatch.setenv("SLIDEGEIST_VOXTRAL_MAX_CHUNK_S", "600")
+    assert transcribers.build_transcriber("voxtral", None).max_chunk_s == 600

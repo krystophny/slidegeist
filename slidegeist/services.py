@@ -27,6 +27,8 @@ from slidegeist.constants import (
     DEFAULT_MISTRAL_URL,
     DEFAULT_OPENROUTER_MODEL,
     DEFAULT_OPENROUTER_URL,
+    DEFAULT_VOXTRAL_BUSY_WAIT,
+    DEFAULT_VOXTRAL_MAX_CHUNK_S,
     DEFAULT_VOXTRAL_MODEL,
     DEFAULT_WHISPER_URL,
 )
@@ -85,15 +87,36 @@ def get_llama_cpp_attempts() -> int:
     return value
 
 
-def get_llama_cpp_busy_wait() -> float:
-    """Return the total seconds to wait for admission at a busy gateway."""
-    raw = os.getenv("SLIDEGEIST_LLAMACPP_BUSY_WAIT", str(DEFAULT_LLAMACPP_BUSY_WAIT))
+def _seconds_from_env(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default))
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ValueError("SLIDEGEIST_LLAMACPP_BUSY_WAIT must be a number") from exc
+        raise ValueError(f"{name} must be a number") from exc
     if value < 0:
-        raise ValueError("SLIDEGEIST_LLAMACPP_BUSY_WAIT must not be negative")
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
+def get_llama_cpp_busy_wait() -> float:
+    """Return the total seconds to wait for admission at a busy gateway."""
+    return _seconds_from_env("SLIDEGEIST_LLAMACPP_BUSY_WAIT", DEFAULT_LLAMACPP_BUSY_WAIT)
+
+
+def get_voxtral_busy_wait() -> float:
+    """Return the total seconds to wait while Mistral reports no capacity."""
+    return _seconds_from_env("SLIDEGEIST_VOXTRAL_BUSY_WAIT", DEFAULT_VOXTRAL_BUSY_WAIT)
+
+
+def get_voxtral_max_chunk_s() -> int:
+    """Return the longest audio span sent in one Voxtral request, in seconds."""
+    raw = os.getenv("SLIDEGEIST_VOXTRAL_MAX_CHUNK_S", str(DEFAULT_VOXTRAL_MAX_CHUNK_S))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("SLIDEGEIST_VOXTRAL_MAX_CHUNK_S must be an integer") from exc
+    if value < 60:
+        raise ValueError("SLIDEGEIST_VOXTRAL_MAX_CHUNK_S must be at least 60")
     return value
 
 
@@ -665,9 +688,11 @@ def voxtral_transcribe(
     ]
     headers = {"Authorization": f"Bearer {api_key}"}
 
+    busy = _BusyBudget(get_voxtral_busy_wait())
     delay = 2.0
     last_error: str = ""
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    while True:
         try:
             status, payload = _post_multipart_file(
                 endpoint, fields, audio_path, headers=headers, timeout=timeout
@@ -678,10 +703,20 @@ def voxtral_transcribe(
             if status < 400:
                 return payload
             last_error = f"voxtral HTTP {status}: {payload}"
+            if status in (429, 503) and busy.remaining > 0:
+                pause = min(busy.delay, 120.0, busy.remaining)
+                logger.warning(
+                    "Mistral transcription at capacity (HTTP %d); waiting %.0fs", status, pause
+                )
+                time.sleep(pause)
+                busy.remaining -= pause
+                busy.delay = min(busy.delay * 2, 120.0)
+                continue
             if status not in (429,) and status < 500:
                 raise RuntimeError(last_error)
 
-        if attempt == attempts:
+        attempt += 1
+        if attempt >= attempts:
             break
         logger.warning(
             "Voxtral attempt %d/%d failed (%s); retrying in %.0fs",
