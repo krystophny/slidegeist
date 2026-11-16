@@ -302,7 +302,7 @@ preconditions are checked before any download starts.
 | `SLIDEGEIST_MISTRAL_API_KEY` | – | Override, checked first |
 | `SLIDEGEIST_MISTRAL_URL` | `https://api.mistral.ai` | Proxy/gateway override |
 | `SLIDEGEIST_VOXTRAL_MODEL` | `voxtral-mini-latest` | Model id |
-| `SLIDEGEIST_VOXTRAL_MAX_CHUNK_S` | `3000` | Split threshold for long audio |
+| `SLIDEGEIST_VOXTRAL_MAX_CHUNK_S` | `1200` | Split threshold for long audio |
 | `SLIDEGEIST_VOXTRAL_BUSY_WAIT` | `1800` | Total seconds per request to wait while Mistral answers 429/503 (out of capacity), in waits of 2-120 s, before the error retries |
 | `SLIDEGEIST_TRANSCRIBER` | `whisper` | Default backend |
 | `SLIDEGEIST_DIARIZE` | `auto` | Default diarization mode; `off` disables it everywhere |

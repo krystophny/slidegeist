@@ -29,9 +29,10 @@ DEFAULT_WHISPER_URL = "http://127.0.0.1:8427"
 # the local Whisper server stays available through --local / --transcriber whisper.
 DEFAULT_MISTRAL_URL = "https://api.mistral.ai"
 DEFAULT_VOXTRAL_MODEL = "voxtral-mini-latest"
-# Mistral accepts up to 3 h per request. 50 min keeps a wide margin and bounds
-# the cost of a retry, while still sending a typical lecture in one piece.
-DEFAULT_VOXTRAL_MAX_CHUNK_S = 3000
+# Mistral documents up to 3 h per request, but on 2026-11-16 it refused 38 min
+# requests with 429 backend_out_of_capacity for over half an hour while 20 min
+# requests passed within seconds.
+DEFAULT_VOXTRAL_MAX_CHUNK_S = 1200
 # Mistral answers 429 backend_out_of_capacity in bursts; waiting for capacity
 # must not spend the error attempts.
 DEFAULT_VOXTRAL_BUSY_WAIT = 1800.0
